@@ -1,0 +1,14 @@
+[project]
+name = "reachy-mini-chat"
+version = "0.1.0"
+description = "Reachy Mini との会話実験。音声入出力から開始。"
+requires-python = ">=3.11"
+dependencies = [
+    "sounddevice>=0.4.7",
+    "soundfile>=0.12.1",
+    "numpy>=1.26",
+    "openai-whisper>=20231117",
+]
+
+[tool.uv]
+package = false
