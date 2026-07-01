@@ -26,9 +26,12 @@ from websockets.sync.client import connect
 
 from reachy_mini import ReachyMini
 
-# 同ディレクトリの既存 VAD 実装と Motion Controller を再利用
+# 同ディレクトリの既存 VAD 実装と Motion Controller / Gaze を再利用
 from conversation import collect_utterance, to_mono_float32  # noqa: E402
+from gaze import GazeTracker  # noqa: E402
 from motion import MotionController  # noqa: E402
+
+GAZE_ENABLED = os.environ.get("GAZE_ENABLED", "1") == "1"
 
 PC_HOST = os.environ.get("PC_HOST", "yoshikinoMacBook-Air.local")
 PC_PORT = int(os.environ.get("PC_PORT", "8765"))
@@ -112,7 +115,11 @@ def main() -> None:
         mini.media.start_playing()
         in_sr = mini.media.get_input_audio_samplerate()
         motion = MotionController(mini)
-        print(f"準備完了 (mic sr={in_sr}). 話しかけてください。Ctrl+C で終了。\n")
+        gaze = GazeTracker(mini, motion) if GAZE_ENABLED else None
+        print(
+            f"準備完了 (mic sr={in_sr}, gaze={'on' if gaze else 'off'}). "
+            "話しかけてください。Ctrl+C で終了。\n"
+        )
 
         with connect(WS_URL, max_size=None) as ws:
             try:
@@ -137,6 +144,8 @@ def main() -> None:
             except KeyboardInterrupt:
                 print("\n終了します。")
             finally:
+                if gaze is not None:
+                    gaze.stop()
                 motion.stop()
                 mini.media.stop_recording()
                 mini.media.stop_playing()

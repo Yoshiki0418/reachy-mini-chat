@@ -65,6 +65,9 @@ class MotionController:
         self._gesture_q: queue.Queue[str] = queue.Queue()
         self._stop = threading.Event()
         self._t0 = time.monotonic()
+        # 視線追従の DC 成分（度）。GazeTracker が set_gaze で目標を与え、ここで平滑化して適用する。
+        self._gaze_target = (0.0, 0.0)  # (yaw, pitch)
+        self._gaze_cur = (0.0, 0.0)
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -72,6 +75,10 @@ class MotionController:
     def set_mode(self, mode: str) -> None:
         """"idle" / "talking" を切り替える。"""
         self._mode = mode
+
+    def set_gaze(self, yaw_deg: float, pitch_deg: float) -> None:
+        """視線の目標角（度）を設定する。相手の顔を追う DC 成分。"""
+        self._gaze_target = (yaw_deg, pitch_deg)
 
     def gesture(self, name: str) -> None:
         """トリガー型ジェスチャーをキューに積む（非ブロッキング）。"""
@@ -105,9 +112,16 @@ class MotionController:
             jitter = 0.3
             roll += random.uniform(-jitter, jitter)
             pitch += random.uniform(-jitter, jitter)
+            # 視線 DC 成分を平滑化して重畳（顔の方を向く）
+            gy, gp = self._gaze_cur
+            ty, tp = self._gaze_target
+            a = 0.25  # 20Hz で時定数 ~0.2s
+            gy += a * (ty - gy)
+            gp += a * (tp - gp)
+            self._gaze_cur = (gy, gp)
             try:
                 self.mini.set_target(
-                    head=_pose(roll=roll, pitch=pitch, yaw=yaw, z=z),
+                    head=_pose(roll=roll, pitch=pitch + gp, yaw=yaw + gy, z=z),
                     antennas=np.deg2rad(ant),
                 )
             except Exception as e:  # noqa: BLE001
