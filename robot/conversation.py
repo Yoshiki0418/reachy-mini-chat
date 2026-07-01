@@ -43,12 +43,20 @@ def collect_utterance(mini: ReachyMini, in_sr: int) -> np.ndarray | None:
     min_limit = int(MIN_SPEECH_SEC * in_sr)
 
     while True:
-        sample = mini.media.get_audio_sample()
+        try:
+            sample = mini.media.get_audio_sample()
+        except Exception as e:  # 一過性の USB I/O エラー等でループを落とさない
+            print(f"(audio read skip: {e})", flush=True)
+            time.sleep(0.01)
+            continue
         if sample is None or len(sample) == 0:
             time.sleep(0.01)
             continue
 
-        doa = mini.media.get_DoA()
+        try:
+            doa = mini.media.get_DoA()
+        except Exception:  # DoA の一過性 USB エラーは「発話なし」として継続
+            doa = None
         is_speech = doa is not None and doa[1]
 
         if not speech_started:

@@ -27,8 +27,8 @@ from reachy_mini.utils import create_head_pose
 
 _ANT_NEUTRAL = np.deg2rad([0.0, 0.0])
 
-# ベース微小モーションの更新レート
-_BASE_RATE_HZ = 30.0
+# ベース微小モーションの更新レート（USB 負荷を抑えつつ十分滑らか）
+_BASE_RATE_HZ = 20.0
 
 
 def _pose(roll: float = 0, pitch: float = 0, yaw: float = 0, z: float = 0):
