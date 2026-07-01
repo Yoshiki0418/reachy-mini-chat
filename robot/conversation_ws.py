@@ -12,6 +12,7 @@ motion 指示を Motion Executor で実行する。
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -20,6 +21,7 @@ import time
 import wave
 from pathlib import Path
 
+import cv2
 from websockets.sync.client import connect
 
 from reachy_mini import ReachyMini
@@ -34,6 +36,32 @@ WS_URL = f"ws://{PC_HOST}:{PC_PORT}/ws/session"
 
 POST_PLAYBACK_DELAY = 0.4  # 再生後のエコー収まり待ち
 RECV_TIMEOUT = 60.0
+FRAME_MAX_W = 512          # 送信フレームの最大幅（VLM は detail=low なので小さくてよい）
+FRAME_JPEG_QUALITY = 70
+
+
+def capture_frame_b64(mini: ReachyMini) -> str | None:
+    """カメラ画像を取得し JPEG(base64) で返す。get_frame は BGR 順なのでそのまま encode。"""
+    try:
+        frame = None
+        for _ in range(3):
+            frame = mini.media.get_frame()
+            if frame is not None:
+                break
+            time.sleep(0.05)
+        if frame is None:
+            return None
+        h, w = frame.shape[:2]
+        if w > FRAME_MAX_W:
+            nh = int(h * FRAME_MAX_W / w)
+            frame = cv2.resize(frame, (FRAME_MAX_W, nh))
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, FRAME_JPEG_QUALITY])
+        if not ok:
+            return None
+        return base64.b64encode(buf.tobytes()).decode("ascii")
+    except Exception as e:  # noqa: BLE001
+        print(f"(frame capture skip: {e})", flush=True)
+        return None
 
 
 def play_wav_bytes(mini: ReachyMini, wav_bytes: bytes) -> None:
@@ -94,7 +122,15 @@ def main() -> None:
                         print("(短すぎてスキップ)", flush=True)
                         continue
                     mono = to_mono_float32(audio)
-                    print(f"📡 送信中 ({len(mono) / in_sr:.1f}s)...", flush=True)
+                    # 発話に合わせて直近のカメラ画像を添えて送る
+                    frame_b64 = capture_frame_b64(mini)
+                    if frame_b64:
+                        ws.send(json.dumps({"type": "frame", "jpeg_b64": frame_b64}))
+                    print(
+                        f"📡 送信中 ({len(mono) / in_sr:.1f}s"
+                        f"{', 📷' if frame_b64 else ''})...",
+                        flush=True,
+                    )
                     ws.send(mono.tobytes())
                     handle_turn(mini, ws, motion)
                     print()

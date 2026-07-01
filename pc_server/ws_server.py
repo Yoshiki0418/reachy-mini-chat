@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import io
+import json
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -65,6 +66,7 @@ async def session(ws: WebSocket) -> None:
     assert _pipeline is not None
     await ws.accept()
     session_id = uuid4().hex[:8]
+    latest_frame_b64: str | None = None
     _log(f"[WS] connected session={session_id}")
 
     try:
@@ -75,18 +77,30 @@ async def session(ws: WebSocket) -> None:
                 break
 
             if "text" in msg and msg["text"]:
-                # 制御メッセージ（今は reset のみ）
-                _log(f"[WS] control: {msg['text']}")
+                # 制御 / カメラフレーム
+                try:
+                    ctrl = json.loads(msg["text"])
+                except (ValueError, TypeError):
+                    _log(f"[WS] control: {msg['text']}")
+                    continue
+                if ctrl.get("type") == "frame":
+                    latest_frame_b64 = ctrl.get("jpeg_b64")
+                else:
+                    _log(f"[WS] control: {ctrl.get('type')}")
                 continue
 
             if "bytes" not in msg or not msg["bytes"]:
                 continue
 
             audio = np.frombuffer(msg["bytes"], dtype=np.float32)
-            _log(f"\n[WS] 受信 {len(audio) / 16000:.1f}s ({len(audio)} samples)")
+            frame_b64, latest_frame_b64 = latest_frame_b64, None  # 直近フレームを1回だけ使う
+            _log(
+                f"\n[WS] 受信 {len(audio) / 16000:.1f}s ({len(audio)} samples)"
+                f"{' +frame' if frame_b64 else ''}"
+            )
 
             t = time.monotonic()
-            async for ev in _pipeline.run_turn(audio, session_id):
+            async for ev in _pipeline.run_turn(audio, session_id, frame_b64=frame_b64):
                 etype = ev["type"]
                 if etype == "audio":
                     await ws.send_bytes(_wav_bytes(ev["sr"], ev["audio"]))

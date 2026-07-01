@@ -51,7 +51,7 @@ class ConversationPipeline:
         return await asyncio.to_thread(self.tts.synthesize, text)
 
     async def run_turn(
-        self, audio: np.ndarray, session_id: str
+        self, audio: np.ndarray, session_id: str, frame_b64: str | None = None
     ) -> AsyncIterator[dict[str, Any]]:
         # --- STT ---
         user_text = await asyncio.to_thread(self.stt.transcribe, audio, "ja")
@@ -59,6 +59,22 @@ class ConversationPipeline:
         if not user_text:
             yield {"type": "turn_end"}
             return
+
+        # --- ユーザーメッセージ（カメラ画像があればマルチモーダルにする）---
+        if frame_b64:
+            user_content: Any = [
+                {"type": "text", "text": user_text},
+                {
+                    "type": "image_url",
+                    # detail=low で画像トークンを一定に抑える（履歴に積んでも安価）
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{frame_b64}",
+                        "detail": "low",
+                    },
+                },
+            ]
+        else:
+            user_content = user_text
 
         # --- モーション side-channel をこのターン用に用意 ---
         sink: list[dict] = []
@@ -73,7 +89,7 @@ class ConversationPipeline:
         config = {"configurable": {"thread_id": session_id}}
         buffer = ""
         async for chunk, _meta in self.agent.astream(
-            {"messages": [HumanMessage(content=user_text)]},
+            {"messages": [HumanMessage(content=user_content)]},
             config=config,
             stream_mode="messages",
         ):
