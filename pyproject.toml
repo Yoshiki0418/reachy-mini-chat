@@ -2,12 +2,21 @@
 name = "reachy-mini-chat"
 version = "0.1.0"
 description = "Reachy Mini との会話実験。音声入出力から開始。"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "sounddevice>=0.4.7",
     "soundfile>=0.12.1",
-    "numpy>=1.26",
+    "numpy==1.26.4",
     "openai-whisper>=20231117",
+    "numba>=0.59",
+    "fastapi>=0.138.0",
+    "uvicorn>=0.49.0",
+    "python-dotenv>=1.2.2",
+    "openai>=2.43.0",
+    "style-bert-vits2>=2.5.0",
+    "langgraph>=1.2.7",
+    "langchain-openai>=1.3.3",
+    "langchain-core>=1.4.8",
 ]
 
 [tool.uv]
