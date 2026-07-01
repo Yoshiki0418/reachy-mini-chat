@@ -28,13 +28,15 @@ RATE_HZ = 15.0
 KP_YAW = float(os.environ.get("GAZE_KP_YAW", "3.0"))
 KP_PITCH = float(os.environ.get("GAZE_KP_PITCH", "2.5"))
 YAW_LIMIT = 30.0
-PITCH_LIMIT = 18.0
+PITCH_LIMIT = 25.0       # ロボットは人より低い位置になりがちで上を向く必要があるため広め
 DEADZONE = 0.06          # 中央付近は動かさない（微振動防止）
 LOST_GRACE_SEC = 0.5     # この時間 顔を見失ったら正面へ戻し始める
 DECAY = 0.9              # 見失い時に視線を 0 へ戻す係数（/ステップ）
 
-YAW_SIGN = float(os.environ.get("GAZE_YAW_SIGN", "1"))
+# 実機で確認した正しい向き: yaw は反転、pitch はそのまま（env で上書き可）。
+YAW_SIGN = float(os.environ.get("GAZE_YAW_SIGN", "-1"))
 PITCH_SIGN = float(os.environ.get("GAZE_PITCH_SIGN", "1"))
+DEBUG = os.environ.get("GAZE_DEBUG", "0") == "1"
 
 # YuNet モデル（OpenCV Zoo, ~340KB）。未配置なら初回に自動ダウンロードする。
 _YUNET_URL = (
@@ -121,6 +123,15 @@ class GazeTracker:
                 off = self._detect_offset(frame)
             else:
                 off = None
+
+            if DEBUG and (int(time.monotonic() * 3) != int((t0 - dt) * 3)):
+                fshape = None if frame is None else frame.shape[:2]
+                off_s = None if off is None else (round(off[0], 2), round(off[1], 2))
+                print(
+                    f"[gaze] frame={fshape} off(dx,dy)={off_s} "
+                    f"gaze(yaw,pitch)=({self._yaw:.1f},{self._pitch:.1f})",
+                    flush=True,
+                )
 
             if off is not None:
                 dx, dy = off
