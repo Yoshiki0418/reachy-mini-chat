@@ -24,9 +24,9 @@ from websockets.sync.client import connect
 
 from reachy_mini import ReachyMini
 
-# 同ディレクトリの既存 VAD 実装と Motion Executor を再利用
+# 同ディレクトリの既存 VAD 実装と Motion Controller を再利用
 from conversation import collect_utterance, to_mono_float32  # noqa: E402
-from motion import MotionExecutor  # noqa: E402
+from motion import MotionController  # noqa: E402
 
 PC_HOST = os.environ.get("PC_HOST", "yoshikinoMacBook-Air.local")
 PC_PORT = int(os.environ.get("PC_PORT", "8765"))
@@ -50,10 +50,11 @@ def play_wav_bytes(mini: ReachyMini, wav_bytes: bytes) -> None:
         path.unlink(missing_ok=True)
 
 
-def handle_turn(mini: ReachyMini, ws, executor: MotionExecutor) -> None:
+def handle_turn(mini: ReachyMini, ws, motion: MotionController) -> None:
     """turn_end まで受信し、音声を逐次再生・motion を実行する。"""
     # 再生中のフィードバック回避のため録音を止める
     mini.media.stop_recording()
+    motion.set_mode("talking")  # 応答中は少し活発に動く
     try:
         while True:
             msg = ws.recv(timeout=RECV_TIMEOUT)
@@ -67,10 +68,11 @@ def handle_turn(mini: ReachyMini, ws, executor: MotionExecutor) -> None:
                 print(f"🗣  User: {ev.get('text')}", flush=True)
             elif etype == "motion":
                 print(f"🤖 motion: {ev.get('name')}", flush=True)
-                executor.play(ev["name"])
+                motion.gesture(ev["name"])
             elif etype == "turn_end":
                 break
     finally:
+        motion.set_mode("idle")
         time.sleep(POST_PLAYBACK_DELAY)
         mini.media.start_recording()
 
@@ -81,7 +83,7 @@ def main() -> None:
         mini.media.start_recording()
         mini.media.start_playing()
         in_sr = mini.media.get_input_audio_samplerate()
-        executor = MotionExecutor(mini)
+        motion = MotionController(mini)
         print(f"準備完了 (mic sr={in_sr}). 話しかけてください。Ctrl+C で終了。\n")
 
         with connect(WS_URL, max_size=None) as ws:
@@ -94,11 +96,12 @@ def main() -> None:
                     mono = to_mono_float32(audio)
                     print(f"📡 送信中 ({len(mono) / in_sr:.1f}s)...", flush=True)
                     ws.send(mono.tobytes())
-                    handle_turn(mini, ws, executor)
+                    handle_turn(mini, ws, motion)
                     print()
             except KeyboardInterrupt:
                 print("\n終了します。")
             finally:
+                motion.stop()
                 mini.media.stop_recording()
                 mini.media.stop_playing()
 
