@@ -25,6 +25,6 @@
 | 目的 | コマンド |
 |---|---|
 | PC 環境（全部入り） | `uv sync` |
-| CI 相当の軽量環境 | `uv sync --no-default-groups --group dev` |
+| CI と同じ環境でチェック（ML 依存なし） | `export UV_PROJECT_ENVIRONMENT=.venv-ci && uv sync --no-default-groups --group dev && uv run pyright && uv run pytest` |
 | PC サーバー起動 | `uv run uvicorn pc_server.ws_server:app --host 0.0.0.0 --port 8765` |
 | ロボットへ反映 | `rsync -avz robot/ pollen@reachy-mini.local:/home/pollen/reachy-mini-chat/robot/` |

@@ -17,3 +17,4 @@ robot/models/
 coverage.xml
 junit.xml
 .pytest_cache/
+.venv-ci/
