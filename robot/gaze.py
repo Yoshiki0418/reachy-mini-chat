@@ -18,10 +18,9 @@ import time
 import urllib.request
 
 import cv2
-
 from reachy_mini import ReachyMini
 
-DETECT_W = 320            # 検出用に縮小する幅
+DETECT_W = 320  # 検出用に縮小する幅
 RATE_HZ = 15.0
 # 視線補正ゲイン（度 / 正規化オフセット / ステップ）。閉ループなので小さめで滑らかに収束。
 KP_YAW = float(os.environ.get("GAZE_KP_YAW", "3.0"))
@@ -39,23 +38,27 @@ DEBUG = os.environ.get("GAZE_DEBUG", "0") == "1"
 
 # --- アイコンタクト判定のしきい値（実機で要調整・env で上書き可）---
 # 「相手が本当にこちらを見ている」時だけ True になるよう保守的に。作業中の下向き顔などは弾く。
-EC_FRONTAL_MAX = float(os.environ.get("EC_FRONTAL_MAX", "0.35"))   # |鼻-両目中点|/両目間（左右の正面度）
-EC_LEVEL_MAX = float(os.environ.get("EC_LEVEL_MAX", "0.35"))      # 両目の高さズレ/両目間（傾き）
-EC_FACE_MIN_FRAC = float(os.environ.get("EC_FACE_MIN_FRAC", "0.14"))  # 顔幅/画面幅（近接＝関心の表れ）
-EC_CENTER_MAX = float(os.environ.get("EC_CENTER_MAX", "0.35"))    # |dx|,|dy|（こちらへ顔を向けている）
+EC_FRONTAL_MAX = float(
+    os.environ.get("EC_FRONTAL_MAX", "0.35")
+)  # |鼻-両目中点|/両目間（左右の正面度）
+EC_LEVEL_MAX = float(os.environ.get("EC_LEVEL_MAX", "0.35"))  # 両目の高さズレ/両目間（傾き）
+EC_FACE_MIN_FRAC = float(
+    os.environ.get("EC_FACE_MIN_FRAC", "0.14")
+)  # 顔幅/画面幅（近接＝関心の表れ）
+EC_CENTER_MAX = float(
+    os.environ.get("EC_CENTER_MAX", "0.35")
+)  # |dx|,|dy|（こちらへ顔を向けている）
 # 鼻が両目より下にある度合い (nose_y-eye_y)/両目間。正面upright なら概ね 0.4〜1.1。
 # 下を向く（作業中）と鼻が目に近づき小さくなる → 弾く。上向きすぎも弾く。
 EC_VERT_MIN = float(os.environ.get("EC_VERT_MIN", "0.15"))
 EC_VERT_MAX = float(os.environ.get("EC_VERT_MAX", "1.6"))
-EC_GRACE = float(os.environ.get("EC_GRACE", "0.4"))              # この時間 生検知が無いとアイコンタクト解除
+EC_GRACE = float(os.environ.get("EC_GRACE", "0.4"))  # この時間 生検知が無いとアイコンタクト解除
 
 _YUNET_URL = (
     "https://github.com/opencv/opencv_zoo/raw/main/models/"
     "face_detection_yunet/face_detection_yunet_2023mar.onnx"
 )
-_YUNET_PATH = os.path.join(
-    os.path.dirname(__file__), "models", "face_detection_yunet_2023mar.onnx"
-)
+_YUNET_PATH = os.path.join(os.path.dirname(__file__), "models", "face_detection_yunet_2023mar.onnx")
 
 
 def _ensure_yunet_model() -> str:
@@ -83,8 +86,8 @@ class GazeTracker:
         self._pitch = 0.0
         self._last_seen = 0.0
         # アイコンタクト状態
-        self._ec_since = 0.0     # 現在のアイコンタクト継続の開始時刻
-        self._ec_last = 0.0      # 最後にアイコンタクト「生」検知した時刻
+        self._ec_since = 0.0  # 現在のアイコンタクト継続の開始時刻
+        self._ec_last = 0.0  # 最後にアイコンタクト「生」検知した時刻
         self._num_faces = 0
         self._last_metrics = (0.0, 0.0, 0.0, 0.0)  # (nose_ratio, level, vert, face_frac) デバッグ用
         self._stop = threading.Event()
@@ -139,9 +142,9 @@ class GazeTracker:
         eye_dist = math.hypot(lex - rex, ley - rey)
         frontal = False
         if eye_dist > 1.0:
-            nose_ratio = abs(nx - cx) / eye_dist       # 左右の正面度
-            level = abs(rey - ley) / eye_dist          # 顔の傾き
-            vert = (ny - cy) / eye_dist                # 鼻が両目より下にある度合い（上下の向き）
+            nose_ratio = abs(nx - cx) / eye_dist  # 左右の正面度
+            level = abs(rey - ley) / eye_dist  # 顔の傾き
+            vert = (ny - cy) / eye_dist  # 鼻が両目より下にある度合い（上下の向き）
             frontal = (
                 nose_ratio < EC_FRONTAL_MAX
                 and level < EC_LEVEL_MAX
@@ -164,7 +167,7 @@ class GazeTracker:
             now = time.monotonic()
 
             if res is not None:
-                dx, dy, frontal, face_frac, n = res
+                dx, dy, frontal, face_frac, _n = res
                 off = (dx, dy)
                 # アイコンタクト「生」判定
                 ec_raw = (
@@ -196,9 +199,7 @@ class GazeTracker:
                     dx = 0.0
                 if abs(dy) < DEADZONE:
                     dy = 0.0
-                self._yaw = _clamp(
-                    self._yaw + YAW_SIGN * KP_YAW * dx, -YAW_LIMIT, YAW_LIMIT
-                )
+                self._yaw = _clamp(self._yaw + YAW_SIGN * KP_YAW * dx, -YAW_LIMIT, YAW_LIMIT)
                 self._pitch = _clamp(
                     self._pitch + PITCH_SIGN * KP_PITCH * dy, -PITCH_LIMIT, PITCH_LIMIT
                 )

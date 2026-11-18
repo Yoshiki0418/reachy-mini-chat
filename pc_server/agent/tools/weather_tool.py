@@ -86,9 +86,7 @@ _JP_CITY_ROMAJI: dict[str, str] = {
 
 
 def _geocode_once(name: str) -> tuple[float, float, str] | None:
-    params = urllib.parse.urlencode(
-        {"name": name, "count": 1, "language": "ja", "format": "json"}
-    )
+    params = urllib.parse.urlencode({"name": name, "count": 1, "language": "ja", "format": "json"})
     url = f"https://geocoding-api.open-meteo.com/v1/search?{params}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "ReachyMini/1.0"})

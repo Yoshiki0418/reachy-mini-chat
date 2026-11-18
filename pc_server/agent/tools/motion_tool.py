@@ -22,13 +22,13 @@ motion_sink_var: contextvars.ContextVar[list | None] = contextvars.ContextVar(
 
 # ロボット側 Motion Executor が解釈するプリセット名。
 MotionName = Literal[
-    "nod",        # うなずく（同意・相槌）
-    "shake",      # 首を横に振る（否定）
-    "tilt",       # 首をかしげる（疑問・興味）
+    "nod",  # うなずく（同意・相槌）
+    "shake",  # 首を横に振る（否定）
+    "tilt",  # 首をかしげる（疑問・興味）
     "look_away",  # 照れて顔を逸らす
-    "happy",      # 嬉しそうにアンテナを動かす
-    "greet",      # 挨拶（軽く頭を動かす）
-    "think",      # 考えるしぐさ
+    "happy",  # 嬉しそうにアンテナを動かす
+    "greet",  # 挨拶（軽く頭を動かす）
+    "think",  # 考えるしぐさ
 ]
 
 

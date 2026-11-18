@@ -12,10 +12,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import numpy as np
 from langchain_core.messages import AIMessageChunk, HumanMessage
+from langchain_core.runnables import RunnableConfig
 
 from pc_server.agent import (
     PersonContext,
@@ -89,7 +91,7 @@ class ConversationPipeline:
         # 顔認識モデルの初期化・DL に失敗しても会話は続けられるよう握りつぶす。
         try:
             self.face: FaceIdentifier | None = FaceIdentifier()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"[person] FaceIdentifier 無効化: {e}", flush=True)
             self.face = None
 
@@ -165,16 +167,20 @@ class ConversationPipeline:
             sink.clear()
             return out
 
-        config = {"configurable": {"thread_id": session_id}}
+        config: RunnableConfig = {"configurable": {"thread_id": session_id}}
         buffer = ""
         async for chunk, _meta in self.agent.astream(
             {"messages": [HumanMessage(content=user_content)]},
             config=config,
             stream_mode="messages",
         ):
-            if not (isinstance(chunk, AIMessageChunk) and chunk.content):
+            # content は str か content block の list。.text は常にテキスト部分の str を返す。
+            if not isinstance(chunk, AIMessageChunk):
                 continue
-            buffer += chunk.content
+            text = chunk.text
+            if not text:
+                continue
+            buffer += text
             sentences, buffer = _split_completed_sentences(buffer)
             for sentence in sentences:
                 for m in drain_motions():

@@ -20,7 +20,7 @@ import io
 import json
 import sys
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 from uuid import uuid4
 
@@ -97,7 +97,7 @@ async def session(ws: WebSocket) -> None:
             if msg["type"] == "websocket.disconnect":
                 break
 
-            if "text" in msg and msg["text"]:
+            if msg.get("text"):
                 # 制御 / カメラフレーム
                 try:
                     ctrl = json.loads(msg["text"])
@@ -134,19 +134,15 @@ async def session(ws: WebSocket) -> None:
             )
             await _forward(
                 ws,
-                _pipeline.run_turn(
-                    audio, session_id, frame_b64=frame_b64, eye_contact=eye_contact
-                ),
+                _pipeline.run_turn(audio, session_id, frame_b64=frame_b64, eye_contact=eye_contact),
             )
 
     except WebSocketDisconnect:
         _log(f"[WS] disconnected session={session_id}")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         _log(f"[WS] error session={session_id}: {e}")
-        try:
+        with suppress(Exception):
             await ws.close()
-        except Exception:
-            pass
 
 
 @app.get("/")

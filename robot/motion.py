@@ -14,6 +14,7 @@ head の回転は degrees、antennas / body_yaw は radians（SDK ドキュメ�
 
 from __future__ import annotations
 
+import contextlib
 import math
 import queue
 import random
@@ -21,7 +22,6 @@ import threading
 import time
 
 import numpy as np
-
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
 
@@ -73,7 +73,7 @@ class MotionController:
 
     # ---- 公開 API ----
     def set_mode(self, mode: str) -> None:
-        """"idle" / "talking" を切り替える。"""
+        """ "idle" / "talking" を切り替える。"""
         self._mode = mode
 
     def set_gaze(self, yaw_deg: float, pitch_deg: float) -> None:
@@ -88,10 +88,8 @@ class MotionController:
         """スレッドを止めて neutral に戻す。"""
         self._stop.set()
         self._thread.join(timeout=2.0)
-        try:
+        with contextlib.suppress(Exception):
             self.mini.goto_target(head=_pose(), antennas=_ANT_NEUTRAL, body_yaw=0.0, duration=0.3)
-        except Exception:
-            pass
 
     # ---- 内部ループ ----
     def _run(self) -> None:
@@ -124,7 +122,7 @@ class MotionController:
                     head=_pose(roll=roll, pitch=pitch + gp, yaw=yaw + gy, z=z),
                     antennas=np.deg2rad(ant),
                 )
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 print(f"[motion] base set_target エラー: {e}", flush=True)
             time.sleep(dt)
 
@@ -135,14 +133,14 @@ class MotionController:
             return
         try:
             fn()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"[motion] {name} 再生エラー: {e}", flush=True)
         finally:
             # ベースへ滑らかに復帰
-            try:
-                self.mini.goto_target(head=_pose(), antennas=_ANT_NEUTRAL, body_yaw=0.0, duration=0.3)
-            except Exception:
-                pass
+            with contextlib.suppress(Exception):
+                self.mini.goto_target(
+                    head=_pose(), antennas=_ANT_NEUTRAL, body_yaw=0.0, duration=0.3
+                )
 
     # ---- ジェスチャープリセット ----
     def _m_nod(self) -> None:  # うなずく
@@ -170,9 +168,7 @@ class MotionController:
             self.mini.goto_target(antennas=np.deg2rad(a), duration=0.16, method="cartoon")
 
     def _m_greet(self) -> None:  # 挨拶
-        self.mini.goto_target(
-            head=_pose(pitch=12), antennas=np.deg2rad([40, 40]), duration=0.3
-        )
+        self.mini.goto_target(head=_pose(pitch=12), antennas=np.deg2rad([40, 40]), duration=0.3)
         self.mini.goto_target(head=_pose(pitch=0), duration=0.3)
 
     def _m_think(self) -> None:  # 考えるしぐさ

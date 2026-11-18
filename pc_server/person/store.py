@@ -51,7 +51,7 @@ class PersonStore:
             for d in data.get("people", []):
                 p = Person(**d)
                 self.people[p.id] = p
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"[person] ストア読込失敗（新規で開始）: {e}", flush=True)
 
     def _save_locked(self) -> None:

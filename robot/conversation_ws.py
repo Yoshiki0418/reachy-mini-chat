@@ -15,21 +15,19 @@ from __future__ import annotations
 import base64
 import json
 import os
-import sys
 import tempfile
 import time
 import wave
 from pathlib import Path
 
 import cv2
-from websockets.sync.client import connect
-
-from reachy_mini import ReachyMini
 
 # 同ディレクトリの既存 VAD 実装と Motion Controller / Gaze を再利用
-from conversation import collect_utterance, to_mono_float32  # noqa: E402
-from gaze import GazeTracker  # noqa: E402
-from motion import MotionController  # noqa: E402
+from conversation import collect_utterance, to_mono_float32
+from gaze import GazeTracker
+from motion import MotionController
+from reachy_mini import ReachyMini
+from websockets.sync.client import connect
 
 GAZE_ENABLED = os.environ.get("GAZE_ENABLED", "1") == "1"
 
@@ -39,16 +37,17 @@ WS_URL = f"ws://{PC_HOST}:{PC_PORT}/ws/session"
 
 POST_PLAYBACK_DELAY = 0.4  # 再生後のエコー収まり待ち
 RECV_TIMEOUT = 60.0
-FRAME_MAX_W = 512          # 送信フレームの最大幅（VLM は detail=low なので小さくてよい）
+FRAME_MAX_W = 512  # 送信フレームの最大幅（VLM は detail=low なので小さくてよい）
 FRAME_JPEG_QUALITY = 70
 
 # --- 自発発話 / エンゲージメント (Phase 5+) ---
 # タイマー式の話題ふりは廃止。相手がこちらを「じっと見ている（持続アイコンタクト）」時だけ
 # ロボットの側から声をかける。安全のため顔検出(gaze)必須。
 PROACTIVE_ENABLED = os.environ.get("PROACTIVE_ENABLED", "1") == "1"
-ENGAGE_EYE_SEC = float(os.environ.get("PROACTIVE_ENGAGE_SEC", "2.0"))   # この秒数 目が合い続けたら声かけ
-PROACTIVE_MIN_GAP = float(os.environ.get("PROACTIVE_MIN_GAP", "15"))    # 自発発話どうしの最小間隔
-POLL_SEC = float(os.environ.get("PROACTIVE_POLL_SEC", "0.5"))          # アイコンタクト判定の粒度
+# この秒数 目が合い続けたら声かけ
+ENGAGE_EYE_SEC = float(os.environ.get("PROACTIVE_ENGAGE_SEC", "2.0"))
+PROACTIVE_MIN_GAP = float(os.environ.get("PROACTIVE_MIN_GAP", "15"))  # 自発発話どうしの最小間隔
+POLL_SEC = float(os.environ.get("PROACTIVE_POLL_SEC", "0.5"))  # アイコンタクト判定の粒度
 # 発話を「自分に向けられた」とみなすのに必要な、発話時点までの継続アイコンタクト秒数。
 # 一瞬こちらを向いただけ・傍聴中のちら見では応答しない。
 GATE_EYE_SEC = float(os.environ.get("GATE_EYE_SEC", "0.5"))
@@ -73,7 +72,7 @@ def capture_frame_b64(mini: ReachyMini) -> str | None:
         if not ok:
             return None
         return base64.b64encode(buf.tobytes()).decode("ascii")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         print(f"(frame capture skip: {e})", flush=True)
         return None
 
@@ -96,8 +95,8 @@ class ProactivePolicy:
 
     def __init__(self, gaze) -> None:
         self.gaze = gaze
-        self.last_proactive = 0.0   # 最後の自発発話/やり取り時刻
-        self.engaged = False        # 今のアイコンタクト継続中に既に関与したか
+        self.last_proactive = 0.0  # 最後の自発発話/やり取り時刻
+        self.engaged = False  # 今のアイコンタクト継続中に既に関与したか
 
     def note_turn(self) -> None:
         """相手と実際にやり取りした（応答した）ことを記録。二重に割り込まないため。"""
@@ -201,7 +200,9 @@ def main() -> None:
                         mono = to_mono_float32(audio)
                         has_frame = send_frame(ws, mini)  # 発話に直近フレームを添える
                         # 発話時に「こちらを一定時間見続けていたか」＝自分に向けられた発話か
-                        eye_contact = bool(gaze.eye_contact(min_duration=GATE_EYE_SEC)) if gaze else True
+                        eye_contact = (
+                            bool(gaze.eye_contact(min_duration=GATE_EYE_SEC)) if gaze else True
+                        )
                         ws.send(json.dumps({"type": "utt_meta", "eye_contact": eye_contact}))
                         print(
                             f"📡 送信中 ({len(mono) / in_sr:.1f}s"
