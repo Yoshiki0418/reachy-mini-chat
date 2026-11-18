@@ -1,24 +1,85 @@
 [project]
 name = "reachy-mini-chat"
 version = "0.1.0"
-description = "Reachy Mini との会話実験。音声入出力から開始。"
+description = "Reachy Mini 受付嬢エージェント「リーチ」"
 requires-python = ">=3.11,<3.13"
+# core: 判断ロジック・エージェント・サーバーの実行に必要な軽量依存（CI はこれ + dev のみ入れる）
 dependencies = [
-    "sounddevice>=0.4.7",
-    "soundfile>=0.12.1",
     "numpy==1.26.4",
-    "openai-whisper>=20231117",
-    "numba>=0.59",
+    "soundfile>=0.12.1",
     "fastapi>=0.138.0",
     "uvicorn>=0.49.0",
     "python-dotenv>=1.2.2",
     "openai>=2.43.0",
-    "style-bert-vits2>=2.5.0",
     "langgraph>=1.2.7",
     "langchain-openai>=1.3.3",
     "langchain-core>=1.4.8",
     "opencv-python-headless>=4.11.0.86",
 ]
 
+[dependency-groups]
+# PC 上のローカル推論（Whisper / SBV2）と音声デバイス。CI・端末には入れない。
+pc-ml = [
+    "openai-whisper>=20231117",
+    "numba>=0.59",
+    "style-bert-vits2>=2.5.0",
+    "sounddevice>=0.4.7",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+    "ruff>=0.17.5",
+    "pyright>=1.1.400",
+    "websockets>=15.0",  # robot/conversation_ws.py（実機 apps_venv にも導入済み）
+]
+
 [tool.uv]
 package = false
+# `uv sync` だけで従来どおり PC サーバーを動かせるよう、既定で両方入れる。
+# CI は `uv sync --no-default-groups --group dev`。
+default-groups = ["dev", "pc-ml"]
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["src"]  # 初期の PC 単体実験コード（参考実装）
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = [
+    "E501",    # 行長は formatter に任せる（日本語コメントで超えやすい）
+    "RUF001",  # 全角記号（日本語文字列）を許可
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pc_server"]
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra --strict-markers"
+markers = [
+    "robot: 実機が必要なテスト（CI では実行しない）",
+]
+
+[tool.coverage.run]
+source = ["pc_server", "robot"]
+omit = ["pc_server/sbv2_tts.py", "pc_server/server.py"]
+
+# ---------------------------------------------------------------- pyright
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+include = ["pc_server", "tests"]
+# ML 依存に強く結びつく旧実装は対象外（pc-ml グループを入れない CI では解決できない）
+exclude = ["pc_server/sbv2_tts.py", "pc_server/server.py", "**/__pycache__", ".venv"]
+venvPath = "."
+venv = ".venv"
+# robot/ のスクリプトはディレクトリ直下 import（実機と同じ）。型チェック対象には含めない
+extraPaths = ["robot"]
