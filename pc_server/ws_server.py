@@ -61,12 +61,33 @@ def _wav_bytes(sr: int, audio: np.ndarray) -> bytes:
     return buf.getvalue()
 
 
+async def _forward(ws: WebSocket, gen: Any) -> None:
+    """パイプラインのイベントジェネレータを WS 経由でロボットへ転送する。
+
+    run_turn（ユーザー発話）と run_proactive（自発発話）で共有。
+    """
+    async for ev in gen:
+        etype = ev["type"]
+        if etype == "audio":
+            await ws.send_bytes(_wav_bytes(ev["sr"], ev["audio"]))
+            _log(f"  [audio] '{ev['text']}'")
+        elif etype == "stt":
+            _log(f"  [stt] User: {ev['text']}")
+            await ws.send_json(ev)
+        elif etype == "motion":
+            _log(f"  [motion] {ev['name']}")
+            await ws.send_json(ev)
+        elif etype == "turn_end":
+            await ws.send_json(ev)
+
+
 @app.websocket("/ws/session")
 async def session(ws: WebSocket) -> None:
     assert _pipeline is not None
     await ws.accept()
     session_id = uuid4().hex[:8]
     latest_frame_b64: str | None = None
+    latest_eye_contact: bool | None = None
     _log(f"[WS] connected session={session_id}")
 
     try:
@@ -83,10 +104,22 @@ async def session(ws: WebSocket) -> None:
                 except (ValueError, TypeError):
                     _log(f"[WS] control: {msg['text']}")
                     continue
-                if ctrl.get("type") == "frame":
+                ctype = ctrl.get("type")
+                if ctype == "frame":
                     latest_frame_b64 = ctrl.get("jpeg_b64")
+                elif ctype == "utt_meta":
+                    # 次の発話に添える文脈（相手がこちらを見ていたか）
+                    latest_eye_contact = bool(ctrl.get("eye_contact", False))
+                elif ctype == "proactive":
+                    # ロボット側の判断による自発発話リクエスト（アイコンタクト起点の声かけ）
+                    reason = ctrl.get("reason", "engage")
+                    frame_b64, latest_frame_b64 = latest_frame_b64, None
+                    _log(f"\n[WS] proactive reason={reason}{' +frame' if frame_b64 else ''}")
+                    await _forward(
+                        ws, _pipeline.run_proactive(session_id, frame_b64=frame_b64, reason=reason)
+                    )
                 else:
-                    _log(f"[WS] control: {ctrl.get('type')}")
+                    _log(f"[WS] control: {ctype}")
                 continue
 
             if "bytes" not in msg or not msg["bytes"]:
@@ -94,25 +127,17 @@ async def session(ws: WebSocket) -> None:
 
             audio = np.frombuffer(msg["bytes"], dtype=np.float32)
             frame_b64, latest_frame_b64 = latest_frame_b64, None  # 直近フレームを1回だけ使う
+            eye_contact, latest_eye_contact = latest_eye_contact, None
             _log(
                 f"\n[WS] 受信 {len(audio) / 16000:.1f}s ({len(audio)} samples)"
-                f"{' +frame' if frame_b64 else ''}"
+                f"{' +frame' if frame_b64 else ''}{' 👁' if eye_contact else ''}"
             )
-
-            t = time.monotonic()
-            async for ev in _pipeline.run_turn(audio, session_id, frame_b64=frame_b64):
-                etype = ev["type"]
-                if etype == "audio":
-                    await ws.send_bytes(_wav_bytes(ev["sr"], ev["audio"]))
-                    _log(f"  [audio] '{ev['text']}'")
-                elif etype == "stt":
-                    _log(f"  [stt {time.monotonic() - t:.1f}s] User: {ev['text']}")
-                    await ws.send_json(ev)
-                elif etype == "motion":
-                    _log(f"  [motion] {ev['name']}")
-                    await ws.send_json(ev)
-                elif etype == "turn_end":
-                    await ws.send_json(ev)
+            await _forward(
+                ws,
+                _pipeline.run_turn(
+                    audio, session_id, frame_b64=frame_b64, eye_contact=eye_contact
+                ),
+            )
 
     except WebSocketDisconnect:
         _log(f"[WS] disconnected session={session_id}")

@@ -31,12 +31,19 @@ MAX_SPEECH_SEC = 20.0        # 長すぎは強制終了
 POST_PLAYBACK_DELAY = 0.4    # 再生後、エコー収まり待ち
 
 
-def collect_utterance(mini: ReachyMini, in_sr: int) -> np.ndarray | None:
-    """発話を検出して終端までのオーディオを返す。短すぎる場合は None。"""
+def collect_utterance(
+    mini: ReachyMini, in_sr: int, idle_timeout: float | None = None
+) -> np.ndarray | None:
+    """発話を検出して終端までのオーディオを返す。短すぎる場合は None。
+
+    idle_timeout を指定すると、発話が始まらないまま その秒数が経過した時点で None を返して
+    呼び出し側に制御を戻す（自発発話などのアイドル処理のため）。None なら発話開始まで待ち続ける。
+    """
     audio_chunks: list[np.ndarray] = []
     speech_started = False
     silent_samples = 0
     total_samples = 0
+    idle_start = time.monotonic()
 
     silence_limit = int(SILENCE_END_SEC * in_sr)
     max_limit = int(MAX_SPEECH_SEC * in_sr)
@@ -66,6 +73,9 @@ def collect_utterance(mini: ReachyMini, in_sr: int) -> np.ndarray | None:
                 total_samples = len(sample)
                 silent_samples = 0
                 print("🎤 発話中...", flush=True)
+            elif idle_timeout is not None and time.monotonic() - idle_start >= idle_timeout:
+                # 発話が始まらないままアイドル時間超過 → 制御を返す
+                return None
             # else: ドロップ
         else:
             audio_chunks.append(sample)
