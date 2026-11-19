@@ -21,6 +21,11 @@ class ServerSettings(BaseSettings):
     server_version: str = __version__
     handshake_timeout_s: float = Field(default=10.0, gt=0, description="接続から hello までの猶予")
 
+    decision_timeout_s: float = Field(
+        default=15.0, gt=0, description="文字起こし後に判定を待つ時間"
+    )
+    max_utterance_s: float = Field(default=30.0, gt=0, description="1 発話の音声の上限")
+
     # プロバイダの選択（reachy_server.providers の登録名）。本物が揃うまで既定は fake
     stt: str = "fake"
     tts: str = "fake"
