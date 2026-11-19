@@ -11,6 +11,12 @@ dependencies = [
 ]
 
 [dependency-groups]
+# このパッケージ単体のテスト用（CI は `uv sync --package reachy-server --group dev`）
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+]
 # GPU 推論（faster-whisper / SBV2 / torch）。CI には入れない。中身は #18 / #19 で追加する。
 gpu = []
 
