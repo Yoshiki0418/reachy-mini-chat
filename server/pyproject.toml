@@ -8,7 +8,9 @@ dependencies = [
     "fastapi>=0.138.0",
     "uvicorn>=0.49.0",
     "pydantic-settings>=2.6",
-    "langchain-core>=1.4.8",  # LLMProvider が返すチャットモデルの型（LangGraph で使う）
+    "langchain-core>=1.4.8",  # LLMProvider が返すチャットモデルの型
+    "langgraph>=1.2.7",  # 会話エージェント
+    "langchain-openai>=1.3.3",  # llm=openai（使うときだけ import）
 ]
 
 [dependency-groups]

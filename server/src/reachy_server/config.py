@@ -31,6 +31,11 @@ class ServerSettings(BaseSettings):
     tts: str = "fake"
     llm: str = "fake"
 
+    # llm=openai のとき（API キーは標準の OPENAI_API_KEY）
+    openai_model: str = "gpt-4o-mini"
+    llm_temperature: float = Field(default=0.7, ge=0, le=2)
+    llm_max_tokens: int = Field(default=200, gt=0, description="1 回の応答の上限（音声なので短く）")
+
     def masked(self) -> dict[str, Any]:
         """ログ用の設定ダンプ（トークンは伏せる）。"""
         return self.model_dump(mode="json") | {"token": "**********"}

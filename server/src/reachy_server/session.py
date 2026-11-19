@@ -29,10 +29,11 @@ from reachy_protocol.messages import (
 from reachy_protocol.transport import Transport, TransportClosed
 from reachy_protocol.version import PROTOCOL_VERSION, is_compatible
 
+from .agent import AgentResponder
 from .config import ServerSettings
 from .conversation import Conversation, ConversationLimits
 from .providers import Providers
-from .responder import LLMResponder, Responder
+from .responder import Responder
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class Session:
         transport: Transport,
         settings: ServerSettings,
         providers: Providers,
-        responder_factory: ResponderFactory = lambda p: LLMResponder(p.llm),
+        responder_factory: ResponderFactory = lambda p: AgentResponder(p.llm),
     ) -> None:
         self.ep = Endpoint(transport, "server")
         self.settings = settings
