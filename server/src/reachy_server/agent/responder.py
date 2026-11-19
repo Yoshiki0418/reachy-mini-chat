@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from ..providers import LLMProvider
@@ -21,10 +22,15 @@ RECURSION_LIMIT = 10
 
 
 def thread_id(request: TurnRequest) -> str:
-    """会話スレッド = 相手 × 日付。相手が分からないときは 'anon'。永続化は #21。"""
+    """会話スレッド = 相手 × 日付。永続化は #21。
+
+    相手を認識できないときは、そのターン限りのスレッド（``anon:<ref>``）にする。
+    見知らぬ来訪者どうしで会話が混ざらないように（同じ人でも文脈は途切れるが、安全側に倒す）。
+    """
     person = request.context.person
-    day = request.context.situation.local_time.date().isoformat()
-    return f"{person.id if person else 'anon'}:{day}"
+    if person is None:
+        return f"anon:{request.ref}"
+    return f"{person.id}:{request.context.situation.local_time.date().isoformat()}"
 
 
 class AgentResponder:
@@ -34,9 +40,10 @@ class AgentResponder:
     async def respond(self, request: TurnRequest) -> AsyncIterator[ReplyEvent]:
         sink: list[str] = []
         token = motion_sink_var.set(sink)
+        tid = thread_id(request)
         try:
             config: RunnableConfig = {
-                "configurable": {"thread_id": thread_id(request)},
+                "configurable": {"thread_id": tid},
                 # ツール呼び出しが止まらない場合の安全弁（agent / tools の往復で約 5 回まで）
                 "recursion_limit": RECURSION_LIMIT,
             }
@@ -62,6 +69,10 @@ class AgentResponder:
             if tail:
                 yield ReplySentence(tail)
         finally:
+            saver = self.agent.checkpointer
+            if request.context.person is None and isinstance(saver, BaseCheckpointSaver):
+                # ターン限りのスレッドは残さない（取消・失敗のときも）
+                await saver.adelete_thread(tid)
             # 別タスクから閉じられた場合は reset できないが、シンクはこのターン限りなので問題ない
             with contextlib.suppress(ValueError):
                 motion_sink_var.reset(token)

@@ -162,7 +162,7 @@ async def test_history_is_kept_per_person_and_day_with_fresh_context() -> None:
 
 def test_thread_id() -> None:
     assert thread_id(req()) == "p1:2026-11-19"
-    assert thread_id(req(context=ctx(None))) == "anon:2026-11-19"
+    assert thread_id(req(context=ctx(None))) == "anon:u1"  # ターン限り
 
 
 # ---------------------------------------------------------------- 描画の細部
@@ -242,3 +242,16 @@ def test_openai_provider_is_built_lazily_without_network(
     assert providers.describe()["llm"] == "openai"
     assert type(model).__name__ == "ChatOpenAI"
     assert (model.model_name, model.max_tokens) == ("gpt-4o-mini", 120)  # type: ignore[attr-defined]
+
+
+async def test_unidentified_visitors_do_not_share_history() -> None:
+    """顔を認識できない来訪者どうしで会話が混ざらない（Codex 指摘 #94）。"""
+    llm = FakeLLM(["一人目への返事。", "二人目への返事。"])
+    responder = AgentResponder(llm)
+    for text in ["内緒の話なんだけど", "こんにちは"]:
+        _ = [e async for e in responder.respond(req(text, ctx(None)))]
+    second = llm.models[0].inputs[1]
+    assert [m.text for m in second[1:]] == ["こんにちは"]  # 一人目の発話は入っていない
+    # ターン限りのスレッドは後片付けされ、メモリに残らない
+    saver = responder.agent.checkpointer
+    assert [c async for c in saver.alist(None)] == []  # type: ignore[union-attr]
