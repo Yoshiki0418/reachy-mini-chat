@@ -270,7 +270,7 @@ START → build_context → respond ⇄ tools → guard → emit → END
 |---|---|---|
 | 設定 | pydantic-settings（しきい値をすべて設定化し、起動時にダンプ） | 同じ（モデル・プロバイダの選択） |
 | 抽象と Fake | `RobotIO` / `FakeRobotIO`、`ServerClient` / `FakeServer` | `STT/LLM/TTSProvider` と Fake |
-| 契約テスト | `protocol/` のスキーマで送受信を検証 | 同じ。**FakeServer と本物のサーバーが同じシナリオを通るか** を CI で確認する |
+| 契約テスト | `protocol/` のスキーマと順序規約（`ConversationChecker`）で送受信を検証。相手役は `FakeServer` | 同じ。**`FakeServer` と本物のサーバーが同じシナリオ（`reachy_protocol.testing`）を通るか** を CI で確認する |
 | 記録と再生 | 全イベント（＋任意で音声・縮小フレーム）を JSONL に記録。判断層に再投入して判定の差分を出す | ターンの入出力と区間時間を記録 |
 | シナリオ評価 | 宛先判定・自発発話の YAML シナリオを CI で決定的に検証する | LLM の応答品質は別ワークフロー（手動・夜間、LLM-as-judge） |
 | 障害対策 | ウォッチドッグ、サーバー断のフォールバック | タイムアウト、サーキットブレーカ、プロバイダのフォールバック |
@@ -283,10 +283,10 @@ START → build_context → respond ⇄ tools → guard → emit → END
 ```
 reachy-mini-chat/
 ├── pyproject.toml            # workspace ルート（dev ツールのみ）
-├── protocol/                 # reachy_protocol: メッセージ定義・版・フレーミング（依存は pydantic のみ）
+├── protocol/                 # reachy_protocol: メッセージ定義・版・フレーミング・順序規約（依存は pydantic のみ）
+│                             #   reachy_protocol.testing: FakeServer / FakeRobotClient / 汎用の契約シナリオ
 ├── robot_app/                # reachy_front: ロボット上で動くフロントエンド
 ├── server/                   # reachy_server: GPU サーバー（ML 依存は gpu グループに分離）
-├── tests/contract/           # ロボットとサーバーをつないだ契約テスト・E2E（Fake プロバイダで）
 ├── robot/                    # 既存の診断スクリプト（段階的に robot_app へ移す）
 ├── pc_server/                # 既存サーバー（段階的に server へ移し、最後に削除する）
 ├── deploy/                   # robot / server の systemd ユニット・デプロイスクリプト
