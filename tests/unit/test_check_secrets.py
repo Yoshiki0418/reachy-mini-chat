@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-import sys
+import importlib.util
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "dev"))
-from check_secrets import forbidden_path_reason, scan_files, scan_text  # noqa: E402
+_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "dev" / "check_secrets.py"
+_spec = importlib.util.spec_from_file_location("check_secrets", _SCRIPT)
+assert _spec is not None and _spec.loader is not None
+check_secrets = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(check_secrets)
+forbidden_path_reason = check_secrets.forbidden_path_reason
+scan_files = check_secrets.scan_files
+scan_text = check_secrets.scan_text
 
 # テスト用のダミー値は実在しない形で、文字列結合で組み立てる（このファイル自体が検出されないように）
 FAKE_OPENAI = "sk-" + "proj-" + "A1b2C3d4E5f6G7h8I9j0K1l2"
@@ -52,7 +58,14 @@ def test_reports_line_numbers() -> None:
 
 @pytest.mark.parametrize(
     "path",
-    [".env", "pc_server/.env", "data/people.json", "people.json.bak.1", "recordings/a.wav", "m/G_3700.pth"],
+    [
+        ".env",
+        "pc_server/.env",
+        "data/people.json",
+        "people.json.bak.1",
+        "recordings/a.wav",
+        "m/G_3700.pth",
+    ],
 )
 def test_forbidden_paths(path: str) -> None:
     assert forbidden_path_reason(path) is not None
@@ -76,12 +89,10 @@ def test_scan_files(tmp_path: Path) -> None:
 
 def test_lockfile_content_is_not_scanned(tmp_path: Path) -> None:
     lock = tmp_path / "uv.lock"
-    lock.write_text('version = "10.4.0.35"\n', encoding="utf-8")
+    lock.write_text('version = "' + "10.4" + '.0.35"\n', encoding="utf-8")
     assert scan_files([str(lock)]) == []
 
 
 def test_repository_is_clean() -> None:
     """リポジトリ自体に秘密情報が入っていないこと（CI でも全ファイル検査する）。"""
-    import check_secrets
-
     assert check_secrets.main(["--all"]) == 0

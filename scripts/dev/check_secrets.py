@@ -22,9 +22,15 @@ ALLOW_MARKER = "secret-scan: allow"
 CONTENT_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("OpenAI API キー", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}")),
     ("Anthropic API キー", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}")),
-    ("GitHub トークン", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})")),
+    (
+        "GitHub トークン",
+        re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})"),
+    ),
     ("秘密鍵", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
-    ("LAN の IP アドレス", re.compile(r"\b(?:192\.168|10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b")),
+    (
+        "LAN の IP アドレス",
+        re.compile(r"\b(?:192\.168|10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b"),
+    ),
 ]
 
 # パスで禁止するもの（顔データ・人物 DB・環境変数・モデル重み）。
@@ -32,7 +38,7 @@ _FORBIDDEN_NAMES = {".env", "people.json"}
 _FORBIDDEN_DIRS = {"data", "recordings"}
 _FORBIDDEN_SUFFIXES = {".pth", ".onnx", ".npy", ".wav"}
 _ALLOWED_NAMES = {".env.example"}
-# 自動生成ファイルは内容を検査しない（パッケージ版番号 10.4.0.35 などが IP に誤マッチする）
+# 自動生成ファイルは内容を検査しない（4 つ組のパッケージ版番号が IP に誤マッチするため）
 _SKIP_CONTENT_NAMES = {"uv.lock"}
 
 
