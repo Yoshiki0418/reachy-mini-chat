@@ -72,3 +72,36 @@ async def test_endpoint_rejects_wrong_direction_binary(receiver: str, kind: str,
     await a.send(encode_frame(header, b""))
     with pytest.raises(MessageDirectionError):
         await ep.recv()
+
+
+async def test_endpoint_refuses_to_send_wrong_direction_message() -> None:
+    a, b = memory_pair()
+    robot = Endpoint(a, "robot")
+    with pytest.raises(MessageDirectionError):
+        await robot.send(TurnEnd(turn_id="t1"))  # turn.end はサーバー専用
+    await a.close()
+    with pytest.raises(TransportClosed):
+        await b.recv()  # 何も送られていない（閉じた通知だけが届く）
+
+
+@pytest.mark.parametrize(
+    ("sender", "kind", "fmt"),
+    [
+        ("robot", "audio_out", "wav_pcm16"),
+        ("server", "audio_in", "pcm_f32le"),
+        ("server", "frame", "jpeg"),
+    ],
+)
+async def test_endpoint_refuses_to_send_wrong_direction_binary(
+    sender: str, kind: str, fmt: str
+) -> None:
+    a, b = memory_pair()
+    ep = Endpoint(a, "robot" if sender == "robot" else "server")
+    header = BinaryHeader.model_validate(
+        {"kind": kind, "ref": "r", "seq": 0, "format": fmt, "sr": 16000}
+    )
+    with pytest.raises(MessageDirectionError):
+        await ep.send_frame(header, b"")
+    await a.close()
+    with pytest.raises(TransportClosed):
+        await b.recv()

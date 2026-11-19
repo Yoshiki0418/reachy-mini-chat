@@ -244,6 +244,11 @@ def test_error_before_handshake_is_allowed() -> None:
             "turn_id t1 が重複",
         ),
         (HANDSHAKE + [(S, wav("t9", 0))], "未知のターン"),
+        # nonce を再利用すると 1 つの pong で両方消えてしまう
+        (
+            HANDSHAKE + [(R, m.Ping(nonce="n1"))] * 2 + [(S, m.Pong(nonce="n1"))],
+            "応答待ちのまま再利用",
+        ),
         (HANDSHAKE + [(R, m.Ping(nonce="n1"))], "pong が返らなかった"),
         (HANDSHAKE + [(S, m.Pong(nonce="n1"))], "対応する ping がない"),
     ],
@@ -266,3 +271,8 @@ def test_finish_is_idempotent() -> None:
     c = ConversationChecker()
     c.observe(R, m.Ping(nonce="n"))
     assert c.finish() == c.finish()
+
+
+def test_nonce_may_be_reused_after_pong() -> None:
+    steps = HANDSHAKE + [(R, m.Ping(nonce="n1")), (S, m.Pong(nonce="n1"))] * 2
+    assert check(steps) == []

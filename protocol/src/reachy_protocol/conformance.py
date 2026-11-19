@@ -275,6 +275,9 @@ class ConversationChecker:
             else:
                 self._tool_calls[msg.call_id] = True
         elif isinstance(msg, Ping):
+            # 応答待ちの nonce を再利用されると、1 つの pong で両方が消えて取りこぼすので違反にする
+            if msg.nonce in self._pings[direction]:
+                self._bad(f"{direction} の ping の nonce {msg.nonce} が応答待ちのまま再利用された")
             self._pings[direction].add(msg.nonce)
         elif isinstance(msg, Pong):
             opposite: Direction = (
