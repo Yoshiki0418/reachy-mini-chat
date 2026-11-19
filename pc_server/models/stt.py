@@ -22,7 +22,8 @@ class WhisperSTT(BaseSTT):
     """OpenAI Whisper (ローカル) による日本語 STT。"""
 
     def __init__(self, model_name: str | None = None) -> None:
-        import whisper  # 遅延 import（起動高速化）
+        # 遅延 import（起動高速化）。whisper は pc-ml グループなので CI には無い
+        import whisper  # pyright: ignore[reportMissingImports]
 
         self.model_name = model_name or os.environ.get("WHISPER_MODEL", "base")
         self._model: Any = whisper.load_model(self.model_name)

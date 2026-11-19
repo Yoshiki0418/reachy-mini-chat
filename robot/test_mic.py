@@ -12,7 +12,6 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
-
 from reachy_mini import ReachyMini
 
 RECORDINGS_DIR = Path(__file__).resolve().parent.parent / "recordings"
@@ -63,7 +62,11 @@ def main() -> None:
                 print(f"タイムアウト: 期待 {target_samples} / 取得 {collected}")
                 break
 
-        audio = np.concatenate(chunks, axis=0)[:target_samples] if chunks else np.zeros((0, in_ch), np.float32)
+        audio = (
+            np.concatenate(chunks, axis=0)[:target_samples]
+            if chunks
+            else np.zeros((0, in_ch), np.float32)
+        )
         print(f"取得サンプル数: {len(audio)} (期待 {target_samples})")
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -77,11 +80,12 @@ def main() -> None:
             out_sr = mini.media.get_output_audio_samplerate()
             if out_sr != in_sr:
                 from scipy.signal import resample
+
                 n_out = int(len(audio) * out_sr / in_sr)
                 playback = resample(audio, n_out).astype(np.float32)
             else:
                 playback = audio
-            print(f"再生中…")
+            print("再生中…")
             mini.media.push_audio_sample(playback)
             time.sleep(len(playback) / out_sr + 0.3)
 

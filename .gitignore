@@ -11,3 +11,10 @@ recordings/*.mp3
 data/
 pc_server/person/models/
 robot/models/
+
+# テスト・カバレッジ出力
+.coverage
+coverage.xml
+junit.xml
+.pytest_cache/
+.venv-ci/

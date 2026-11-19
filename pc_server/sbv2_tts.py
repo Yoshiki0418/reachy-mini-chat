@@ -9,11 +9,11 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
 
 # Monkeypatch: 一部環境でBERT出力がFP16になりLinear層(FP32)とtype mismatchになる対策。
 # import 順序が重要 (TTSModel より先に当てる)
 import style_bert_vits2.models.infer as infer_module
+import torch
 
 _original_get_text = infer_module.get_text
 
@@ -75,9 +75,7 @@ class StyleBertVITS2TTS:
         config_path = model_dir / "config.json"
         style_vec_path = model_dir / "style_vectors.npy"
 
-        ckpts = sorted(
-            model_dir.glob("G_*.pth"), key=lambda p: p.stat().st_mtime, reverse=True
-        )
+        ckpts = sorted(model_dir.glob("G_*.pth"), key=lambda p: p.stat().st_mtime, reverse=True)
         if not ckpts:
             raise FileNotFoundError(f"{model_dir} に G_*.pth が見つかりません。")
         model_path = ckpts[0]

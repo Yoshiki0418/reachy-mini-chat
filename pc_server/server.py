@@ -15,7 +15,6 @@ import sys
 import threading
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -29,13 +28,12 @@ from openai import OpenAI
 def _log(*args: Any) -> None:
     print(*args, flush=True, file=sys.stderr)
 
+
 load_dotenv()
 
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-SBV2_MODEL_DIR = os.environ.get(
-    "SBV2_MODEL_DIR", "/Users/yoshiki/Downloads/gakucho_ai_v2"
-)
+SBV2_MODEL_DIR = os.environ.get("SBV2_MODEL_DIR", "/Users/yoshiki/Downloads/gakucho_ai_v2")
 SBV2_LENGTH = float(os.environ.get("SBV2_LENGTH", "1.1"))
 SAMPLE_RATE = 16000  # Robotとmini.mediaの整合性のため16kHzに揃える
 
@@ -66,6 +64,7 @@ async def lifespan(app: FastAPI):
     _log(f"Style-Bert-VITS2 をロード中… ({SBV2_MODEL_DIR})")
     t = time.monotonic()
     from pc_server.sbv2_tts import StyleBertVITS2TTS  # 遅延 import (起動高速化)
+
     _tts = StyleBertVITS2TTS(model_dir=SBV2_MODEL_DIR, length=SBV2_LENGTH)
     _log(f"  → {time.monotonic() - t:.1f}s")
     _log("Ready.")

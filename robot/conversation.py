@@ -17,7 +17,6 @@ import wave
 from pathlib import Path
 
 import numpy as np
-
 from reachy_mini import ReachyMini
 
 PC_HOST = os.environ.get("PC_HOST", "yoshikinoMacBook-Air.local")
@@ -25,10 +24,10 @@ PC_PORT = int(os.environ.get("PC_PORT", "8765"))
 SERVER_URL = f"http://{PC_HOST}:{PC_PORT}/turn"
 
 # VAD パラメータ
-SILENCE_END_SEC = 0.8       # 発話終了判定: 連続無音
-MIN_SPEECH_SEC = 0.4         # 短すぎは無視
-MAX_SPEECH_SEC = 20.0        # 長すぎは強制終了
-POST_PLAYBACK_DELAY = 0.4    # 再生後、エコー収まり待ち
+SILENCE_END_SEC = 0.8  # 発話終了判定: 連続無音
+MIN_SPEECH_SEC = 0.4  # 短すぎは無視
+MAX_SPEECH_SEC = 20.0  # 長すぎは強制終了
+POST_PLAYBACK_DELAY = 0.4  # 再生後、エコー収まり待ち
 
 
 def collect_utterance(

@@ -1,0 +1,26 @@
+name: 不具合
+description: 期待と違う動作
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: 何が起きたか
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待した動作
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 再現手順・状況
+      description: 実機 / PC、プロファイル、ログ（あれば session 記録）
+  - type: dropdown
+    id: where
+    attributes:
+      label: 発生箇所
+      options: [robot, pc_server, CI, 不明]

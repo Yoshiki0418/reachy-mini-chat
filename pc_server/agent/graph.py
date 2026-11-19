@@ -29,7 +29,7 @@ def build_agent(
     checkpointer: MemorySaver | None = None,
 ) -> CompiledStateGraph:
     """ツール付き会話エージェントをビルドして返す。"""
-    llm = ChatOpenAI(model=model, temperature=temperature, max_tokens=max_tokens)
+    llm = ChatOpenAI(model=model, temperature=temperature, max_completion_tokens=max_tokens)
     return create_react_agent(
         llm,
         ALL_TOOLS,

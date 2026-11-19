@@ -37,7 +37,7 @@ def main() -> None:
 
     t = time.monotonic()
     print("文字起こし中…")
-    segments, info = model.transcribe(str(wav), language=args.language, vad_filter=False)
+    segments, _info = model.transcribe(str(wav), language=args.language, vad_filter=False)
     text = "".join(seg.text for seg in segments).strip()
     print(f"  → {time.monotonic() - t:.1f}s")
 

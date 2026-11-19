@@ -19,14 +19,12 @@ if TYPE_CHECKING:
 
 @dataclass
 class PersonContext:
-    store: "PersonStore"
+    store: PersonStore
     person_id: str
 
 
 # ターン中の「今話している相手」。認識できない時は None。
-current_person_var: ContextVar[PersonContext | None] = ContextVar(
-    "current_person", default=None
-)
+current_person_var: ContextVar[PersonContext | None] = ContextVar("current_person", default=None)
 
 
 # 名前として妥当でない（文っぽい・長すぎる）文字列を弾く。STT 幻聴でのDB汚染防止。
@@ -40,9 +38,9 @@ def _looks_like_name(name: str) -> bool:
     if any(c in name for c in _NAME_STOP_CHARS):
         return False
     # 「〜です」「〜ます」など文末表現を含むものは名前ではないとみなす
-    if any(name.endswith(s) for s in ("です", "ます", "ました", "だよ", "でしょう", "ください")):
-        return False
-    return True
+    return not any(
+        name.endswith(s) for s in ("です", "ます", "ました", "だよ", "でしょう", "ください")
+    )
 
 
 @tool

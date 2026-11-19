@@ -5,4 +5,4 @@ from __future__ import annotations
 from .stt import BaseSTT, WhisperSTT
 from .tts import BaseTTS, get_tts
 
-__all__ = ["BaseSTT", "WhisperSTT", "BaseTTS", "get_tts"]
+__all__ = ["BaseSTT", "BaseTTS", "WhisperSTT", "get_tts"]

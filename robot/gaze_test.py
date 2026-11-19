@@ -15,10 +15,9 @@ import time
 
 os.environ.setdefault("GAZE_DEBUG", "1")
 
-from reachy_mini import ReachyMini  # noqa: E402
-
-from motion import MotionController  # noqa: E402
-from gaze import GazeTracker  # noqa: E402
+from gaze import GazeTracker
+from motion import MotionController
+from reachy_mini import ReachyMini
 
 
 def main() -> None:

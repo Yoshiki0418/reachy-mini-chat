@@ -10,7 +10,6 @@ from __future__ import annotations
 import time
 
 import numpy as np
-
 from reachy_mini import ReachyMini
 
 
@@ -55,13 +54,13 @@ def main() -> None:
             if doa_result is not None and len(chunks_info) < 10:
                 chunks_info.append(f"  DoA: angle={doa_result[0]:.2f}rad is_speech={doa_result[1]}")
 
-        print(f"\n結果:")
+        print("\n結果:")
         print(f"  None 返却回数  : {none_count}")
         print(f"  空配列 返却回数: {empty_count}")
         print(f"  非ゼロチャンク : {nonzero_count}")
         print(f"  合計サンプル   : {total_samples} (期待 ~{int(5 * in_sr)})")
         print(f"  最大peak       : {max_peak:.6f}")
-        print(f"\n最初の10件のチャンク情報:")
+        print("\n最初の10件のチャンク情報:")
         for c in chunks_info:
             print(c)
 

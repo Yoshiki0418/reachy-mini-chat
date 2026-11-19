@@ -42,9 +42,7 @@ class FaceIdentifier:
             (320, 320),
             score_threshold=score_threshold,
         )
-        self._recognizer = cv2.FaceRecognizerSF.create(
-            _ensure_model(_SFACE_URL, "sface.onnx"), ""
-        )
+        self._recognizer = cv2.FaceRecognizerSF.create(_ensure_model(_SFACE_URL, "sface.onnx"), "")
 
     def embed_bgr(self, frame: np.ndarray) -> np.ndarray | None:
         """BGR フレームから最大顔の L2 正規化済み 128 次元特徴を返す。顔が無ければ None。"""
@@ -68,6 +66,6 @@ class FaceIdentifier:
             if frame is None:
                 return None
             return self.embed_bgr(frame)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"[person] 顔埋め込み失敗: {e}", flush=True)
             return None
