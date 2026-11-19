@@ -21,6 +21,11 @@ class ServerSettings(BaseSettings):
     server_version: str = __version__
     handshake_timeout_s: float = Field(default=10.0, gt=0, description="接続から hello までの猶予")
 
+    # プロバイダの選択（reachy_server.providers の登録名）。本物が揃うまで既定は fake
+    stt: str = "fake"
+    tts: str = "fake"
+    llm: str = "fake"
+
     def masked(self) -> dict[str, Any]:
         """ログ用の設定ダンプ（トークンは伏せる）。"""
         return self.model_dump(mode="json") | {"token": "**********"}

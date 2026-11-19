@@ -17,12 +17,17 @@ from reachy_protocol.testing import (
 )
 from reachy_protocol.transport import Transport, TransportClosed, memory_pair
 from reachy_server.config import ServerSettings
+from reachy_server.providers import FakeLLM, FakeSTT, FakeTTS, Providers
 from reachy_server.session import Session
+
+
+def fake_providers() -> Providers:
+    return Providers(stt=FakeSTT(), tts=FakeTTS(), llm=FakeLLM())
 
 
 def handler(settings: ServerSettings):  # type: ignore[no-untyped-def]
     async def serve(transport: Transport) -> None:
-        await Session(transport, settings).run()
+        await Session(transport, settings, fake_providers()).run()
 
     return serve
 
@@ -46,7 +51,7 @@ async def test_conversation_scenarios(settings: ServerSettings, token: str, name
 
 async def _start(settings: ServerSettings) -> tuple[Transport, asyncio.Task[None]]:
     robot, server = memory_pair()
-    task = asyncio.create_task(Session(server, settings).run())
+    task = asyncio.create_task(Session(server, settings, fake_providers()).run())
     return robot, task
 
 
@@ -88,7 +93,7 @@ async def test_bad_frames_after_handshake_keep_connection(
     settings: ServerSettings, token: str
 ) -> None:
     robot_end, server_end = memory_pair()
-    task = asyncio.create_task(Session(server_end, settings).run())
+    task = asyncio.create_task(Session(server_end, settings, fake_providers()).run())
     async with FakeRobotClient(robot_end, token=token) as robot:
         await robot.connect()
         await robot_end.send("not json")
@@ -102,7 +107,7 @@ async def test_bad_frames_after_handshake_keep_connection(
 
 async def test_second_hello_is_rejected(settings: ServerSettings, token: str) -> None:
     robot_end, server_end = memory_pair()
-    task = asyncio.create_task(Session(server_end, settings).run())
+    task = asyncio.create_task(Session(server_end, settings, fake_providers()).run())
     async with FakeRobotClient(robot_end, token=token) as robot:
         await robot.connect()
         reply = await robot.connect()
@@ -114,7 +119,7 @@ async def test_unimplemented_messages_get_error_with_ref(
     settings: ServerSettings, token: str
 ) -> None:
     robot_end, server_end = memory_pair()
-    task = asyncio.create_task(Session(server_end, settings).run())
+    task = asyncio.create_task(Session(server_end, settings, fake_providers()).run())
     async with FakeRobotClient(robot_end, token=token) as robot:
         await robot.connect()
         with pytest.raises(AssertionError, match="文字起こしがエラー"):
@@ -132,7 +137,7 @@ async def test_unexpected_crash_reports_internal_error_and_closes(
 
     monkeypatch.setattr(Session, "_dispatch", boom)
     robot_end, server_end = memory_pair()
-    task = asyncio.create_task(Session(server_end, settings).run())
+    task = asyncio.create_task(Session(server_end, settings, fake_providers()).run())
     async with FakeRobotClient(robot_end, token=token) as robot:
         await robot.connect()
         await robot_end.send(dump_message(Ping(nonce="n")))
@@ -142,7 +147,7 @@ async def test_unexpected_crash_reports_internal_error_and_closes(
 
 async def test_error_from_robot_is_accepted(settings: ServerSettings, token: str) -> None:
     robot_end, server_end = memory_pair()
-    task = asyncio.create_task(Session(server_end, settings).run())
+    task = asyncio.create_task(Session(server_end, settings, fake_providers()).run())
     async with FakeRobotClient(robot_end, token=token) as robot:
         await robot.connect()
         await robot_end.send(dump_message(Error(code="internal", message="camera down")))

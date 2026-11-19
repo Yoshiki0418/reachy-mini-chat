@@ -17,14 +17,18 @@ from reachy_protocol.transport import Transport, TransportClosed
 from reachy_protocol.version import PROTOCOL_VERSION, is_compatible
 
 from .config import ServerSettings
+from .providers import Providers
 
 log = logging.getLogger(__name__)
 
 
 class Session:
-    def __init__(self, transport: Transport, settings: ServerSettings) -> None:
+    def __init__(
+        self, transport: Transport, settings: ServerSettings, providers: Providers
+    ) -> None:
         self.ep = Endpoint(transport, "server")
         self.settings = settings
+        self.providers = providers
         self.robot_id: str | None = None
 
     async def run(self) -> None:
@@ -67,7 +71,9 @@ class Session:
             await self._send_quietly(Error(code="unauthorized"))
             return False
         self.robot_id = first.robot_id
-        await self.ep.send(Welcome(server_version=self.settings.server_version, models={}))
+        await self.ep.send(
+            Welcome(server_version=self.settings.server_version, models=self.providers.describe())
+        )
         log.info("session open robot_id=%s protocol=%s", first.robot_id, first.protocol_version)
         return True
 
