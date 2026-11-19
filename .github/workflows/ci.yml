@@ -62,10 +62,32 @@ jobs:
       - run: uv sync ${{ env.UV_SYNC_ARGS }}
       - run: uv run --no-sync pyright
 
+  # パッケージごとに「そのパッケージの依存だけ」で環境を作ってテストする。
+  # ロボット（CM4 の apps_venv）とサーバーの依存が混ざっていないこと自体を検証する。
   test:
-    name: Test (pytest)
+    name: Test (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: legacy
+            sync: --locked --no-default-groups --group dev
+            paths: tests
+            cov: --cov=pc_server --cov=robot
+          - name: protocol
+            sync: --locked --package reachy-protocol --group dev
+            paths: protocol/tests
+            cov: --cov=reachy_protocol
+          - name: robot
+            sync: --locked --package reachy-front --group dev
+            paths: robot_app/tests
+            cov: --cov=reachy_front
+          - name: server
+            sync: --locked --package reachy-server --group dev
+            paths: server/tests
+            cov: --cov=reachy_server
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -73,28 +95,29 @@ jobs:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
-      - run: uv sync ${{ env.UV_SYNC_ARGS }}
+      - run: uv sync ${{ matrix.sync }}
       - name: pytest
         env:
           # 外部 API を誤って叩かないよう、ダミーキーで固定
           OPENAI_API_KEY: sk-ci-dummy
+        # `uv run --package` は --no-sync と併用できないので venv の python を直接使う
         run: >-
-          uv run --no-sync pytest -m "not robot"
-          --cov --cov-report=term-missing:skip-covered --cov-report=xml
+          .venv/bin/python -m pytest -m "not robot" ${{ matrix.paths }}
+          ${{ matrix.cov }} --cov-report=term-missing:skip-covered --cov-report=xml
           --junitxml=junit.xml
       - name: Coverage summary
         if: always()
         run: |
           {
-            echo '### Coverage'
+            echo '### Coverage (${{ matrix.name }})'
             echo '```'
-            uv run --no-sync coverage report --skip-covered --skip-empty | tail -n 30
+            .venv/bin/python -m coverage report --skip-covered --skip-empty | tail -n 30
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: test-results
+          name: test-results-${{ matrix.name }}
           path: |
             junit.xml
             coverage.xml
