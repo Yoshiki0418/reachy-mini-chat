@@ -206,3 +206,20 @@ def test_hello_defaults_to_current_protocol_version() -> None:
     from reachy_protocol import PROTOCOL_VERSION
 
     assert m.Hello(robot_id="r", token=SecretStr("t")).protocol_version == PROTOCOL_VERSION
+
+
+def test_local_time_requires_timezone() -> None:
+    """タイムゾーンなしの時刻は受け手によって解釈が変わるので、境界で拒否する（#89）。"""
+    with pytest.raises(m.ValidationError):
+        m.Situation(people_count=1, local_time=datetime(2026, 11, 19, 9, 0))
+    with pytest.raises(m.ValidationError):
+        m.parse_message(
+            {
+                "type": "proactive.request",
+                "intent_id": "i1",
+                "kind": "greet",
+                "context": {"situation": {"people_count": 1, "local_time": "2026-11-19T09:00:00"}},
+            }
+        )
+    ok = m.Situation(people_count=1, local_time=datetime(2026, 11, 19, 9, 0, tzinfo=JST))
+    assert ok.local_time.utcoffset() == timedelta(hours=9)

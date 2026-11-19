@@ -11,10 +11,10 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
 from typing import Annotated, Any, Literal, Self, TypeAlias
 
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
@@ -111,7 +111,9 @@ class PersonProfile(_Model):
 
 class Situation(_Model):
     people_count: int = Field(ge=0)
-    local_time: datetime = Field(description="ロボット設置場所の現地時刻（タイムゾーン付き）")
+    local_time: AwareDatetime = Field(
+        description="ロボット設置場所の現地時刻。タイムゾーン必須（受け手で解釈がぶれないように）"
+    )
     others_present: list[Annotated[str, Field(max_length=32)]] = Field(
         default_factory=list, max_length=20, description="同席している既知の人の名前"
     )
