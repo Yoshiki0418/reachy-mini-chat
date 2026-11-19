@@ -39,5 +39,6 @@
 | Git フックの導入（初回のみ） | `uv run pre-commit install` |
 | フックを全ファイルに実行 | `uv run pre-commit run --all-files` |
 | CI と同じ環境でチェック（ML 依存なし） | `export UV_PROJECT_ENVIRONMENT=.venv-ci && uv sync --no-default-groups --group dev && uv run pyright && uv run pytest` |
-| PC サーバー起動 | `uv run uvicorn pc_server.ws_server:app --host 0.0.0.0 --port 8765` |
+| 旧 PC サーバー起動 | `uv run uvicorn pc_server.ws_server:app --host 0.0.0.0 --port 8765` |
+| 新サーバー起動（GPU マシン） | `uv run python -m reachy_server`（`REACHY_SERVER_TOKEN` 必須。待ち受けは `REACHY_SERVER_HOST` / `REACHY_SERVER_PORT`） |
 | ロボットへ反映 | `rsync -avz robot/ pollen@reachy-mini.local:/home/pollen/reachy-mini-chat/robot/` |
