@@ -359,3 +359,33 @@ async def test_close_stops_everything() -> None:
     await asyncio.sleep(0.02)
     await h.conv.close()
     assert h.conv._tasks == set()  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_back_to_back_requests_still_start_and_end_each_turn() -> None:
+    """2 つ目の依頼が、1 つ目のターンのタスクが動き出す前に届いても、1 つ目を閉じる（Codex 指摘 #93）。"""
+    h = Harness()
+    await h.conv.handle(ProactiveRequest(intent_id="i1", kind="greet", context=CTX))
+    await h.conv.handle(
+        ProactiveRequest(intent_id="i2", kind="engage", context=CTX)
+    )  # 間に yield なし
+    await h.settle()
+    starts_and_ends = [(o.type, o.turn_id) for o in h.out if isinstance(o, TurnStart | TurnEnd)]
+    assert starts_and_ends == [
+        ("turn.start", "t1"),
+        ("turn.end", "t1"),
+        ("turn.start", "t2"),
+        ("turn.end", "t2"),
+    ]
+    assert [e.status for e in h.of(TurnEnd)] == ["cancelled", "ok"]
+
+
+async def test_cancel_right_after_start_still_ends_turn() -> None:
+    h = Harness()
+    await h.conv.handle(ProactiveRequest(intent_id="i1", kind="greet", context=CTX))
+    await h.conv.handle(TurnCancel(turn_id="t1"))  # タスクが動き出す前に取消
+    await h.settle()
+    assert [(o.type, o.turn_id) for o in h.out if isinstance(o, TurnStart | TurnEnd)] == [
+        ("turn.start", "t1"),
+        ("turn.end", "t1"),
+    ]
+    assert h.of(TurnEnd)[0].status == "cancelled"

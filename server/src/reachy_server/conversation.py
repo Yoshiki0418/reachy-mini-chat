@@ -56,7 +56,9 @@ class _Utterance:
 class _Turn:
     turn_id: str
     ref: str
-    task: asyncio.Task[None]
+    task: asyncio.Task[None] | None = None
+    ended: bool = False
+    """turn.end を送ったか。止めたタスクが送らずに終わったら、代わりに送る。"""
 
 
 @dataclass(frozen=True)
@@ -219,25 +221,36 @@ class Conversation:
     # ------------------------------------------------------------ ターン
 
     async def _start_turn(self, request: TurnRequest) -> None:
-        # 同時に 2 つは話さない。進行中のターンは取消してから始める
-        if self._turn is not None and not self._turn.task.done():
-            self._turn.task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._turn.task
+        # 同時に 2 つは話さない。進行中のターンは閉じてから始める
+        if self._turn is not None:
+            await self._stop_turn(self._turn)
         self._turn_seq += 1
-        turn_id = f"t{self._turn_seq}"
-        task = self._spawn(self._run_turn(turn_id, request))
-        self._turn = _Turn(turn_id=turn_id, ref=request.ref, task=task)
+        turn = _Turn(turn_id=f"t{self._turn_seq}", ref=request.ref)
+        self._turn = turn
+        # turn.start はタスクを作る前に送る。タスクが動き出す前に取消されても、
+        # 「始まったターンは必ず turn.end で閉じる」を _stop_turn が守れるようにするため
+        await self._send(TurnStart(turn_id=turn.turn_id, ref=request.ref))
+        turn.task = self._spawn(self._run_turn(turn, request))
+
+    async def _stop_turn(self, turn: _Turn) -> None:
+        """ターンを止め、まだなら turn.end(cancelled) を送る。"""
+        if turn.task is not None and not turn.task.done():
+            turn.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await turn.task
+        if not turn.ended:
+            await self._send(TurnEnd(turn_id=turn.turn_id, status="cancelled"))
+            turn.ended = True
 
     async def _on_cancel(self, msg: TurnCancel) -> None:
         turn = self._turn
-        if turn is not None and turn.turn_id == msg.turn_id and not turn.task.done():
-            turn.task.cancel()
+        if turn is not None and turn.turn_id == msg.turn_id and not turn.ended:
+            await self._stop_turn(turn)
         # 終了済み・未知のターンへの取消は行き違いとして黙って受け流す
 
-    async def _run_turn(self, turn_id: str, request: TurnRequest) -> None:
-        """生成と合成をパイプラインで流す。取消されても必ず turn.end を送る。"""
-        await self._send(TurnStart(turn_id=turn_id, ref=request.ref))
+    async def _run_turn(self, turn: _Turn, request: TurnRequest) -> None:
+        """生成と合成をパイプラインで流す。取消されても turn.end を送る。"""
+        turn_id = turn.turn_id
         status: Literal["ok", "cancelled", "error"] = "ok"
         error: str | None = None
         queue: asyncio.Queue[ReplySentence | None] = asyncio.Queue()
@@ -263,6 +276,7 @@ class Conversation:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await producer
         await self._send(TurnEnd(turn_id=turn_id, status=status, error=error))
+        turn.ended = True
 
     async def _produce(
         self, turn_id: str, request: TurnRequest, queue: asyncio.Queue[ReplySentence | None]
