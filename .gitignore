@@ -6,3 +6,8 @@ recordings/*.wav
 recordings/*.aiff
 recordings/*.mp3
 .env
+
+# 人物メモリの永続データ・DL済みモデル (Phase 5)
+data/
+pc_server/person/models/
+robot/models/
