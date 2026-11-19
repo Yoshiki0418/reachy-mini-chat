@@ -162,7 +162,7 @@ async def test_history_is_kept_per_person_and_day_with_fresh_context() -> None:
 
 def test_thread_id() -> None:
     assert thread_id(req()) == "robot:p1:2026-11-19"
-    assert thread_id(req(context=ctx(None))) == "robot:anon:u1"  # ターン限り
+    assert thread_id(req(context=ctx(None))) == "robot:*:u1"  # ターン限り
 
 
 # ---------------------------------------------------------------- 描画の細部

@@ -235,3 +235,24 @@ async def test_ignored_utterances_become_overheard_context(
     assert "最近まわりで聞こえた会話" in system and "「来週の締切やばいね」" in system
     assert "自分から話題にしない" in system
     assert [m.text for m in llm.models[0].inputs[0][1:]] == ["リーチ、聞いてた？"]
+
+
+async def test_ids_containing_colons_are_handled() -> None:
+    """プロトコルの ID は ':' を含みうる。忘却も保持期限も正しく効く（Codex 指摘 #95）。"""
+    store = HistoryStore()
+    tricky = person_thread("lab:entrance", "p:1", DAY)
+    other = person_thread("lab:entrance", "p", DAY)
+    await seed(store, tricky, other)
+    assert await store.prune(14, today=DAY) == 0  # 壊れたスレッド扱いで消されない
+    assert await store.forget_person("lab:entrance", "p:1") == 1
+    assert await store.thread_ids() == {other}
+
+
+def test_thread_id_components_are_reversible() -> None:
+    from reachy_server.history import _parse  # pyright: ignore[reportPrivateUsage]
+
+    assert _parse(person_thread("a:b", "c%3Ad", DAY)) == ("a:b", "c%3Ad", DAY.isoformat())
+    assert _parse(anon_thread("r:1", "u:9")) == ("r:1", None, "u:9")
+    # 実在の person_id が "anon" や "*" でも、相手不明のスレッドと区別できる
+    assert _parse(person_thread("r", "anon", DAY)) == ("r", "anon", DAY.isoformat())
+    assert _parse(person_thread("r", "*", DAY)) == ("r", "*", DAY.isoformat())

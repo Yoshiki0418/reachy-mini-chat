@@ -1,6 +1,6 @@
 """会話履歴（LangGraph のチェックポイント）の保存先と、削除・保持期限。設計書 §4.1。
 
-スレッド ID は ``<robot_id>:<person_id>:<YYYY-MM-DD>``。履歴に残るのは発話・ツール・応答だけで、
+スレッド ID は ``<robot_id>:<person_id>:<YYYY-MM-DD>``（各要素は URL エンコードする。ID は ':' を含みうるため）。履歴に残るのは発話・ツール・応答だけで、
 相手のプロフィールや状況（turn_context）は保存しない（人物情報の正本はロボット側）。
 """
 
@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import urllib.parse
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -18,23 +19,32 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 log = logging.getLogger(__name__)
 
-ANON = "anon"
+ANON = "*"
+"""相手不明の印。URL エンコードした ID には '*' が現れない（%2A になる）ので、実在の ID と衝突しない。"""
+
+
+def _enc(value: str) -> str:
+    return urllib.parse.quote(value, safe="")
 
 
 def person_thread(robot_id: str, person_id: str, day: date) -> str:
-    return f"{robot_id}:{person_id}:{day.isoformat()}"
+    return f"{_enc(robot_id)}:{_enc(person_id)}:{day.isoformat()}"
 
 
 def anon_thread(robot_id: str, ref: str) -> str:
     """相手が不明なターン限りのスレッド。"""
-    return f"{robot_id}:{ANON}:{ref}"
+    return f"{_enc(robot_id)}:{ANON}:{_enc(ref)}"
 
 
-def _parse(thread_id: str) -> tuple[str, str, str] | None:
+def _parse(thread_id: str) -> tuple[str, str | None, str] | None:
+    """(robot_id, person_id か相手不明なら None, 日付か ref) に戻す。形式外は None。"""
     parts = thread_id.split(":")
     if len(parts) != 3:
         return None
-    return parts[0], parts[1], parts[2]
+    robot, person, last = parts
+    if person == ANON:
+        return urllib.parse.unquote(robot), None, urllib.parse.unquote(last)
+    return urllib.parse.unquote(robot), urllib.parse.unquote(person), last
 
 
 class HistoryStore:
@@ -105,7 +115,7 @@ class HistoryStore:
         for t in await self.thread_ids():
             parsed = _parse(t)
             try:
-                day = date.fromisoformat(parsed[2]) if parsed and parsed[1] != ANON else None
+                day = date.fromisoformat(parsed[2]) if parsed and parsed[1] is not None else None
             except ValueError:
                 day = None
             if day is None or day < cutoff:
