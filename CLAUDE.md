@@ -2,6 +2,16 @@
 
 設計の正は [docs/DESIGN.md](docs/DESIGN.md)。経緯・実機セットアップは [HANDOFF.md](HANDOFF.md)。
 
+## リポジトリ構成（uv workspace）
+| ディレクトリ | import 名 | 動く場所 | 役割 |
+|---|---|---|---|
+| `protocol/` | `reachy_protocol` | 両方 | ロボット⇄サーバー間のメッセージ定義（依存は pydantic のみ） |
+| `robot_app/` | `reachy_front` | Reachy Mini（apps_venv） | 知覚・判断・人物の記憶・サーバー呼び出し・表現 |
+| `server/` | `reachy_server` | 研究室 GPU マシン | STT・応答生成・TTS・会話履歴（ML 依存は `gpu` グループ） |
+| `pc_server/`, `robot/` | — | — | 移行前の旧実装。新パッケージへ移し終えたら削除する |
+
+新しいコードは新パッケージに書く。旧実装は移行の Issue でだけ触る。
+
 ## 開発サイクル（Issue 駆動）
 1. GitHub Issue を 1 つ選ぶ（マイルストーンの若い順・P0 優先・依存が解決済みのもの）。着手時に自分を assign し、Issue にコメントで方針を書く。
 2. `main` から `feat/<issue番号>-<短いslug>` ブランチを切る（CI/基盤は `ci/`、修正は `fix/`）。

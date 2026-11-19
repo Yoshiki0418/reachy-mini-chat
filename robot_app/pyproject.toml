@@ -1,0 +1,25 @@
+[project]
+name = "reachy-front"
+version = "0.1.0"
+description = "Reachy Mini 上で動くフロントエンド（知覚・判断・記憶・サーバー呼び出し・表現）"
+requires-python = ">=3.11,<3.13"
+# reachy_mini SDK は実機の /venvs/apps_venv に導入済みなのでここには書かない（CI ではスタブ）
+dependencies = [
+    "reachy-protocol",
+    "pydantic-settings>=2.6",
+]
+
+[dependency-groups]
+# このパッケージ単体のテスト用（CI は `uv sync --package <名前> --group dev` で、このパッケージの依存だけの環境を作る）
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+]
+
+[tool.uv.sources]
+reachy-protocol = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.10.10,<0.11"]
+build-backend = "uv_build"
