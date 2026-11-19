@@ -2,7 +2,7 @@
 
 - :mod:`reachy_protocol.messages`: 制御メッセージ（WebSocket の text フレーム）
 - :mod:`reachy_protocol.version`: 版と互換判定
-- バイナリフレーミング（音声・画像）は #10 で追加する
+- :mod:`reachy_protocol.framing`: バイナリフレーム（音声・画像）
 """
 
 from __future__ import annotations
