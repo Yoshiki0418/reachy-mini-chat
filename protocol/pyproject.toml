@@ -1,0 +1,13 @@
+[project]
+name = "reachy-protocol"
+version = "0.1.0"
+description = "ロボット（フロントエンド）と GPU サーバー間のメッセージ定義（共有の契約）"
+requires-python = ">=3.11,<3.13"
+# ロボット（CM4）とサーバーの両方に入るので依存は最小限にする
+dependencies = [
+    "pydantic>=2.10",
+]
+
+[build-system]
+requires = ["uv_build>=0.10.10,<0.11"]
+build-backend = "uv_build"

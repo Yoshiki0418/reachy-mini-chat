@@ -1,0 +1,22 @@
+[project]
+name = "reachy-server"
+version = "0.1.0"
+description = "研究室 GPU マシン上の生成バックエンド（STT・応答生成・TTS・会話履歴）"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "reachy-protocol",
+    "fastapi>=0.138.0",
+    "uvicorn>=0.49.0",
+    "pydantic-settings>=2.6",
+]
+
+[dependency-groups]
+# GPU 推論（faster-whisper / SBV2 / torch）。CI には入れない。中身は #18 / #19 で追加する。
+gpu = []
+
+[tool.uv.sources]
+reachy-protocol = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.10.10,<0.11"]
+build-backend = "uv_build"
