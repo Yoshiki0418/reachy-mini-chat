@@ -29,9 +29,11 @@ import soundfile as sf
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
-from pc_server.pipeline import ConversationPipeline
-
+# pipeline 以下はモジュール読み込み時に環境変数を読む（OPENAI_MODEL・AGENT_*・PERSON_* など）。
+# .env の値を反映させるため、import より前に読み込む。
 load_dotenv()
+
+from pc_server.pipeline import ConversationPipeline  # noqa: E402
 
 
 def _log(*args: Any) -> None:

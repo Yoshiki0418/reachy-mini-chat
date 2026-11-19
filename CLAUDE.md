@@ -10,7 +10,7 @@
 | `server/` | `reachy_server` | 研究室 GPU マシン | STT・応答生成・TTS・会話履歴（ML 依存は `gpu` グループ） |
 | `pc_server/`, `robot/` | — | — | 移行前の旧実装。新パッケージへ移し終えたら削除する |
 
-新しいコードは新パッケージに書く。旧実装は移行の Issue でだけ触る。
+新しいコードは新パッケージに書く。旧実装（`pc_server/`, `robot/`）に新機能は足さない。旧実装を触ってよいのは、(1) 移行の Issue と、(2) 今も実機で使っている旧実装の**不具合修正**（Issue を立て、回帰テストを付ける）だけ。
 
 ## 開発サイクル（Issue 駆動）
 1. GitHub Issue を 1 つ選ぶ（マイルストーンの若い順・P0 優先・依存が解決済みのもの）。着手時に自分を assign し、Issue にコメントで方針を書く。
@@ -21,7 +21,8 @@
    uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest
    ```
 5. PR を作成（テンプレートに従う。本文に `Closes #<issue>`）。`needs-robot` の Issue は「実機確認」欄に手順を書き、オーナーに確認を依頼する。
-6. **マージはオーナーが行う。** `main` へ直接 push しない。PR の CI が赤のままレビュー依頼しない。
+6. PR を出したら CI の完了を待ち、**Codex の自動レビュー（`chatgpt-codex-connector`）の指摘を確認する**。妥当なら同じ PR で直してコメントに返信し、見送るなら理由を返信する。確認: `gh api repos/Yoshiki0418/reachy-mini-chat/pulls/<番号>/comments`
+7. **マージはオーナーが行う。** `main` へ直接 push しない。PR の CI が赤のままレビュー依頼しない。
 
 ## 守ること
 - 1 PR = 1 Issue（小さく保つ）。無関係なリファクタを混ぜない。
