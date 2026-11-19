@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Sequence
+import json
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
+from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
-from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolCallChunk
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from pydantic import Field
 
 from reachy_protocol.messages import Emotion
 
@@ -55,23 +59,91 @@ class FakeTTS:
         return silent_wav(len(text) * self.seconds_per_char, self.sr)
 
 
-@dataclass
-class FakeLLM:
-    """台本どおりの返答をストリーミングするチャットモデルを作る。
+class ScriptedChatModel(BaseChatModel):
+    """台本どおりの AIMessage を順に返すチャットモデル。ツール呼び出しも台本に書ける。
 
-    台本を使い切ったら最後の返答を繰り返す。ツール呼び出しの台本は #20 で拡張する。
+    - ストリーミングではテキストを数文字ずつ、ツール呼び出しは最後のチャンクで返す
+    - 台本を使い切ったら最後のメッセージを繰り返す
+    - 受け取った入力（プロンプト）を ``inputs`` に記録する（テストでプロンプトを検査するため）
     """
 
-    replies: Sequence[str] = ("こんにちは！今日も来てくれてうれしいな。",)
+    script: list[AIMessage]
+    chunk_chars: int = 3
+    inputs: list[list[BaseMessage]] = Field(default_factory=list[list[BaseMessage]])
+    cursor: int = 0
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted-fake"
+
+    def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> ScriptedChatModel:  # type: ignore[override]
+        return self  # 台本が決まっているのでツール定義は使わない
+
+    def _next(self, messages: list[BaseMessage]) -> AIMessage:
+        self.inputs.append(list(messages))
+        msg = self.script[min(self.cursor, len(self.script) - 1)] if self.script else AIMessage("")
+        self.cursor += 1
+        return msg
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        return ChatResult(generations=[ChatGeneration(message=self._next(messages))])
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        msg = self._next(messages)
+        text = msg.text
+        for i in range(0, len(text), self.chunk_chars):
+            yield ChatGenerationChunk(
+                message=AIMessageChunk(content=text[i : i + self.chunk_chars])
+            )
+        if msg.tool_calls:
+            yield ChatGenerationChunk(
+                message=AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[
+                        ToolCallChunk(
+                            name=tc["name"], args=json.dumps(tc["args"]), id=tc["id"], index=i
+                        )
+                        for i, tc in enumerate(msg.tool_calls)
+                    ],
+                )
+            )
+
+
+def tool_call(
+    name: str, args: dict[str, Any] | None = None, call_id: str | None = None
+) -> AIMessage:
+    """台本用: ツールを呼ぶだけの AI メッセージ。"""
+    return AIMessage(
+        content="", tool_calls=[{"name": name, "args": args or {}, "id": call_id or f"call_{name}"}]
+    )
+
+
+@dataclass
+class FakeLLM:
+    """台本どおりの返答（テキスト・ツール呼び出し）をストリーミングするチャットモデルを作る。
+
+    文字列はそのままの返答、``tool_call()`` で作ったメッセージはツール呼び出しになる。
+    ``chat_model()`` を呼ぶたびに台本の先頭から始まる。
+    """
+
+    replies: Sequence[str | AIMessage] = ("こんにちは！今日も来てくれてうれしいな。",)
     name: str = "fake"
+    models: list[ScriptedChatModel] = field(default_factory=list[ScriptedChatModel])
 
     def chat_model(self) -> BaseChatModel:
-        replies = list(self.replies) or [""]
-
-        def forever() -> object:
-            i = 0
-            while True:
-                yield AIMessage(content=replies[min(i, len(replies) - 1)])
-                i += 1
-
-        return GenericFakeChatModel(messages=forever())  # pyright: ignore[reportArgumentType]
+        script = [AIMessage(r) if isinstance(r, str) else r for r in self.replies]
+        model = ScriptedChatModel(script=script)
+        self.models.append(model)
+        return model

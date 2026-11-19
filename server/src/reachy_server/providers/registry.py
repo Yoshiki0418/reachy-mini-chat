@@ -105,3 +105,17 @@ def _fake_tts(_settings: ServerSettings) -> TTSProvider:
 @register_llm("fake")
 def _fake_llm(_settings: ServerSettings) -> LLMProvider:
     return FakeLLM()
+
+
+# ---------------------------------------------------------------- 組み込み（クラウド）
+
+
+@register_llm("openai")
+def _openai_llm(settings: ServerSettings) -> LLMProvider:
+    from .openai_llm import OpenAILLM  # 使うときだけ読み込む
+
+    return OpenAILLM(
+        model=settings.openai_model,
+        temperature=settings.llm_temperature,
+        max_tokens=settings.llm_max_tokens,
+    )
