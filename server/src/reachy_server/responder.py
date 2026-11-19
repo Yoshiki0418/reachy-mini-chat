@@ -22,6 +22,10 @@ class TurnRequest:
     """ユーザー発話への応答なら文字起こし。自発発話なら None。"""
     proactive_kind: Literal["greet", "engage", "see_off"] | None = None
     strategy: str | None = None
+    robot_id: str = "robot"
+    """会話スレッドをロボットごとに分けるため。"""
+    overheard: tuple[str, ...] = ()
+    """最近まわりで聞こえた、自分宛てではない発話（場の文脈）。"""
 
 
 @dataclass(frozen=True)

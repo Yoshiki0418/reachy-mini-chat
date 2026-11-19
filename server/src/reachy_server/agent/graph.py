@@ -2,8 +2,9 @@
 
     START → agent ⇄ tools → END
 
-ターンごとの文脈は状態の ``turn_context`` に入れ、agent ノードがシステムメッセージの末尾に付ける。
-履歴（messages）にはユーザー発話・ツール・応答だけが残り、文脈は毎ターン最新のものに差し替わる。
+ターンごとの文脈（相手・状況）は実行時の設定 ``configurable.turn_context`` で渡し、agent ノードが
+システムメッセージの末尾に付ける。状態には入れないので、**履歴（チェックポイント）には保存されない**。
+履歴に残るのはユーザー発話・ツール・応答だけ（人物情報の正本はロボット側。設計書 §2.4）。
 コンテキスト構築・ガードのノードの追加は #63。
 
 （旧実装の ``create_react_agent`` は LangGraph v1.0 で非推奨になったため使わない）
@@ -16,6 +17,7 @@ from typing import Annotated, Any, TypedDict
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AnyMessage, BaseMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
@@ -30,13 +32,10 @@ from .tools import ALL_TOOLS
 
 class ReachyAgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
-    turn_context: str
 
 
-def build_prompt(state: ReachyAgentState) -> list[BaseMessage]:
-    system = PERSONA
-    if state.get("turn_context"):
-        system = f"{PERSONA}\n{state['turn_context']}"
+def build_prompt(state: ReachyAgentState, turn_context: str = "") -> list[BaseMessage]:
+    system = f"{PERSONA}\n{turn_context}" if turn_context else PERSONA
     return [SystemMessage(system), *state["messages"]]
 
 
@@ -47,9 +46,12 @@ def build_agent(
 ) -> CompiledStateGraph[Any]:
     bound = model.bind_tools(list(tools))
 
-    async def agent(state: ReachyAgentState) -> dict[str, list[BaseMessage]]:
+    async def agent(
+        state: ReachyAgentState, config: RunnableConfig
+    ) -> dict[str, list[BaseMessage]]:
+        turn_context = str(config.get("configurable", {}).get("turn_context", ""))
         # ainvoke でも、stream_mode="messages" で呼ばれればトークンはストリーミングされる
-        return {"messages": [await bound.ainvoke(build_prompt(state))]}
+        return {"messages": [await bound.ainvoke(build_prompt(state, turn_context))]}
 
     graph = StateGraph(ReachyAgentState)
     graph.add_node("agent", agent)

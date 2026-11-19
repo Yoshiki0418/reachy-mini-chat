@@ -11,6 +11,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
+from ..history import anon_thread, person_thread
 from ..providers import LLMProvider
 from ..responder import ReplyEvent, ReplyMotion, ReplySentence, TurnRequest
 from ..text import split_completed
@@ -22,20 +23,24 @@ RECURSION_LIMIT = 10
 
 
 def thread_id(request: TurnRequest) -> str:
-    """会話スレッド = 相手 × 日付。永続化は #21。
+    """会話スレッド = ロボット × 相手 × 日付（:mod:`reachy_server.history`）。
 
-    相手を認識できないときは、そのターン限りのスレッド（``anon:<ref>``）にする。
+    相手を認識できないときは、そのターン限りのスレッドにして終了時に消す。
     見知らぬ来訪者どうしで会話が混ざらないように（同じ人でも文脈は途切れるが、安全側に倒す）。
     """
     person = request.context.person
     if person is None:
-        return f"anon:{request.ref}"
-    return f"{person.id}:{request.context.situation.local_time.date().isoformat()}"
+        return anon_thread(request.robot_id, request.ref)
+    return person_thread(request.robot_id, person.id, request.context.situation.local_time.date())
 
 
 class AgentResponder:
-    def __init__(self, llm: LLMProvider, agent: CompiledStateGraph[Any] | None = None) -> None:
-        self.agent = agent or build_agent(llm.chat_model())
+    def __init__(
+        self, llm: LLMProvider, checkpointer: BaseCheckpointSaver[Any] | None = None
+    ) -> None:
+        self.agent: CompiledStateGraph[Any] = build_agent(
+            llm.chat_model(), checkpointer=checkpointer
+        )
 
     async def respond(self, request: TurnRequest) -> AsyncIterator[ReplyEvent]:
         sink: list[str] = []
@@ -43,14 +48,12 @@ class AgentResponder:
         tid = thread_id(request)
         try:
             config: RunnableConfig = {
-                "configurable": {"thread_id": tid},
+                # turn_context は状態ではなく設定で渡す（履歴に保存しない）
+                "configurable": {"thread_id": tid, "turn_context": render_context(request)},
                 # ツール呼び出しが止まらない場合の安全弁（agent / tools の往復で約 5 回まで）
                 "recursion_limit": RECURSION_LIMIT,
             }
-            inputs = {
-                "messages": [HumanMessage(user_message(request))],
-                "turn_context": render_context(request),
-            }
+            inputs = {"messages": [HumanMessage(user_message(request))]}
             buffer = ""
             async for item in self.agent.astream(inputs, config, stream_mode="messages"):
                 chunk, meta = cast(tuple[Any, dict[str, Any]], item)
