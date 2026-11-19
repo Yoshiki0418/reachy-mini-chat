@@ -45,6 +45,8 @@ jobs:
       - run: uv sync ${{ env.UV_SYNC_ARGS }}
       - run: uv run --no-sync ruff check --output-format=github .
       - run: uv run --no-sync ruff format --check --diff .
+      - name: 秘密情報・個人データのチェック（git 管理下の全ファイル）
+        run: uv run --no-sync python scripts/dev/check_secrets.py --all
 
   typecheck:
     name: Typecheck (pyright)

@@ -31,6 +31,7 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.17.5",
     "pyright>=1.1.400",
+    "pre-commit>=4.0",
     "websockets>=15.0",  # robot/conversation_ws.py（実機 apps_venv にも導入済み）
 ]
 
@@ -76,8 +77,8 @@ omit = ["pc_server/sbv2_tts.py", "pc_server/server.py"]
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
-include = ["pc_server", "tests"]
+include = ["pc_server", "tests", "scripts"]
 # ML 依存に強く結びつく旧実装は対象外（pc-ml グループを入れない CI では解決できない）
 exclude = ["pc_server/sbv2_tts.py", "pc_server/server.py", "**/__pycache__", ".venv"]
 # robot/ のスクリプトはディレクトリ直下 import（実機と同じ）。型チェック対象には含めない
-extraPaths = ["robot"]
+extraPaths = ["robot", "scripts/dev"]
