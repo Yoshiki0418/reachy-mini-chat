@@ -67,3 +67,19 @@ def test_settings_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path, token: str
     assert s.token.get_secret_value() == token
     assert s.masked()["token"] == "**********"
     assert token not in repr(s)
+
+
+def test_main_binds_to_configured_host_and_port(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, token: str
+) -> None:  # type: ignore[no-untyped-def]
+    """REACHY_SERVER_HOST / PORT が実際の待ち受けに使われる（Codex レビュー指摘 #91）。"""
+    import reachy_server.__main__ as entry
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REACHY_SERVER_TOKEN", token)
+    monkeypatch.setenv("REACHY_SERVER_HOST", "127.0.0.1")
+    monkeypatch.setenv("REACHY_SERVER_PORT", "9123")
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(entry.uvicorn, "run", lambda app, **kw: calls.append(kw))
+    entry.main()
+    assert calls == [{"host": "127.0.0.1", "port": 9123}]

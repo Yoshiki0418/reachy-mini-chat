@@ -1,7 +1,6 @@
 """FastAPI アプリ。WS /v1/session と /healthz。
 
-起動:
-    REACHY_SERVER_TOKEN=... uv run uvicorn reachy_server.app:create_app --factory --host 0.0.0.0 --port 8765
+起動は ``python -m reachy_server``（設定の host / port で待ち受ける。:mod:`reachy_server.__main__`）。
 """
 
 from __future__ import annotations
