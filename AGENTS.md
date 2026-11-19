@@ -6,7 +6,7 @@
 1. GitHub Issue を 1 つ選ぶ（マイルストーンの若い順・P0 優先・依存が解決済みのもの）。着手時に自分を assign し、Issue にコメントで方針を書く。
 2. `main` から `feat/<issue番号>-<短いslug>` ブランチを切る（CI/基盤は `ci/`、修正は `fix/`）。
 3. 実装＋テスト。判断ロジックは純粋関数/クラスに分け、必ず単体テストを付ける。
-4. ローカルで CI と同じチェックを通す:
+4. ローカルで CI と同じチェックを通す（pre-commit を入れていればコミット時に lint・秘密情報チェック、push 時に pyright が自動で走る）:
    ```bash
    uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest
    ```
@@ -25,6 +25,8 @@
 | 目的 | コマンド |
 |---|---|
 | PC 環境（全部入り） | `uv sync` |
+| Git フックの導入（初回のみ） | `uv run pre-commit install` |
+| フックを全ファイルに実行 | `uv run pre-commit run --all-files` |
 | CI と同じ環境でチェック（ML 依存なし） | `export UV_PROJECT_ENVIRONMENT=.venv-ci && uv sync --no-default-groups --group dev && uv run pyright && uv run pytest` |
 | PC サーバー起動 | `uv run uvicorn pc_server.ws_server:app --host 0.0.0.0 --port 8765` |
 | ロボットへ反映 | `rsync -avz robot/ pollen@reachy-mini.local:/home/pollen/reachy-mini-chat/robot/` |
