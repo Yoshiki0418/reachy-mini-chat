@@ -70,6 +70,10 @@ ignore = [
     "RUF003",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# テストではやり取りの列を `+` でつなぐほうが読みやすい
+"**/tests/**" = ["RUF005"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["pc_server", "reachy_protocol", "reachy_front", "reachy_server"]
 
