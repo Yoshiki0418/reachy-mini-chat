@@ -31,6 +31,7 @@ from reachy_protocol.messages import (
     UtteranceEnd,
 )
 
+from .overheard import OverheardBuffer
 from .providers import STTProvider, TTSProvider
 from .responder import ReplyMotion, ReplySentence, Responder, TurnRequest
 
@@ -79,7 +80,11 @@ class Conversation:
         tts: TTSProvider,
         responder: Responder,
         limits: ConversationLimits | None = None,
+        robot_id: str = "robot",
+        overheard: OverheardBuffer | None = None,
     ) -> None:
+        self.robot_id = robot_id
+        self.overheard = overheard or OverheardBuffer(ttl_s=0)
         self._send = send
         self._send_frame = send_frame
         self.stt = stt
@@ -113,6 +118,7 @@ class Conversation:
                     context=item.context,
                     proactive_kind=item.kind,
                     strategy=item.strategy,
+                    **self._common(),
                 )
             )
         elif isinstance(item, TurnCancel):
@@ -120,6 +126,9 @@ class Conversation:
         else:
             return False
         return True
+
+    def _common(self) -> dict[str, Any]:
+        return {"robot_id": self.robot_id, "overheard": self.overheard.recent()}
 
     async def close(self) -> None:
         """接続の終了。進行中の処理をすべて止める（相手はもういないので何も送らない）。"""
@@ -214,9 +223,12 @@ class Conversation:
             return
         self._drop(msg.utt_id)
         if msg.decision != "respond" or msg.context is None:
-            # ignore / backchannel: 割り込まない。場の文脈として残すのは #21
+            # ignore / backchannel: 割り込まない。場の文脈としてだけ短時間覚えておく
+            self.overheard.add(utt.text)
             return
-        await self._start_turn(TurnRequest(ref=msg.utt_id, context=msg.context, user_text=utt.text))
+        await self._start_turn(
+            TurnRequest(ref=msg.utt_id, context=msg.context, user_text=utt.text, **self._common())
+        )
 
     # ------------------------------------------------------------ ターン
 

@@ -104,6 +104,12 @@ def render_context(request: TurnRequest) -> str:
     lines += _render_person(request.context.person)
     if request.strategy:
         lines.append(f"- 話しかけ方の方針: {request.strategy}")
+    if request.overheard:
+        lines.append(
+            "- 最近まわりで聞こえた会話（あなた宛てではない。自分から話題にしない。"
+            "相手がその話に触れたときの理解の助けにだけ使う）:"
+        )
+        lines += [f"  - 「{text}」" for text in request.overheard]
     return "\n".join(lines)
 
 

@@ -16,7 +16,8 @@ def token() -> str:
 
 @pytest.fixture
 def settings(token: str) -> ServerSettings:
-    return ServerSettings(token=SecretStr(token), handshake_timeout_s=0.5)
+    # history_db="" はメモリ上の履歴（テストがリポジトリ内に DB を作らないように）
+    return ServerSettings(token=SecretStr(token), handshake_timeout_s=0.5, history_db="")
 
 
 @pytest.fixture

@@ -26,6 +26,13 @@ class ServerSettings(BaseSettings):
     )
     max_utterance_s: float = Field(default=30.0, gt=0, description="1 発話の音声の上限")
 
+    # 会話履歴（SQLite。空ならメモリ上）と保持期限
+    history_db: str = "data/server/history.sqlite"
+    history_retention_days: int = Field(default=14, ge=1)
+    # 場の文脈バッファ（自分宛てでない発話を短時間だけ覚える。0 で無効）
+    overheard_ttl_s: float = Field(default=600.0, ge=0)
+    overheard_max: int = Field(default=20, ge=1)
+
     # プロバイダの選択（reachy_server.providers の登録名）。本物が揃うまで既定は fake
     stt: str = "fake"
     tts: str = "fake"
