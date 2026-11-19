@@ -8,6 +8,7 @@ dependencies = [
     "fastapi>=0.138.0",
     "uvicorn>=0.49.0",
     "pydantic-settings>=2.6",
+    "langchain-core>=1.4.8",  # LLMProvider が返すチャットモデルの型（LangGraph で使う）
 ]
 
 [dependency-groups]
