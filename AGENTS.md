@@ -21,7 +21,8 @@
    uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest
    ```
 5. PR を作成（テンプレートに従う。本文に `Closes #<issue>`）。`needs-robot` の Issue は「実機確認」欄に手順を書き、オーナーに確認を依頼する。
-6. **マージはオーナーが行う。** `main` へ直接 push しない。PR の CI が赤のままレビュー依頼しない。
+6. PR を出したら CI の完了を待ち、**Codex の自動レビュー（`chatgpt-codex-connector`）の指摘を確認する**。妥当なら同じ PR で直してコメントに返信し、見送るなら理由を返信する。確認: `gh api repos/Yoshiki0418/reachy-mini-chat/pulls/<番号>/comments`
+7. **マージはオーナーが行う。** `main` へ直接 push しない。PR の CI が赤のままレビュー依頼しない。
 
 ## 守ること
 - 1 PR = 1 Issue（小さく保つ）。無関係なリファクタを混ぜない。
