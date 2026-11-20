@@ -42,9 +42,18 @@ class PersonStore:
         self._load()
 
     # ---- 永続化 ----
+    def _restrict_permissions(self) -> None:
+        """顔の埋め込みと名前を他のユーザーに読ませない（ディレクトリ 0700・ファイル 0600）。"""
+        directory = os.path.dirname(self.path) or "."
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        os.chmod(directory, 0o700)  # 既存のディレクトリは makedirs の mode が効かない
+        if os.path.exists(self.path):
+            os.chmod(self.path, 0o600)
+
     def _load(self) -> None:
         if not os.path.exists(self.path):
             return
+        self._restrict_permissions()  # 以前の版が 0644 で書いたファイルも直す
         try:
             with open(self.path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -55,9 +64,12 @@ class PersonStore:
             print(f"[person] ストア読込失敗（新規で開始）: {e}", flush=True)
 
     def _save_locked(self) -> None:
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self._restrict_permissions()
         tmp = f"{self.path}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
+        # 最初から 0600 で作る（書いてから chmod すると、その間は他人に読める）
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)  # 既に一時ファイルがあった場合、O_CREAT の mode は効かない
+        with open(fd, "w", encoding="utf-8") as f:
             json.dump(
                 {"people": [asdict(p) for p in self.people.values()]},
                 f,
