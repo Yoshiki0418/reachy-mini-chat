@@ -67,3 +67,46 @@ def test_corrupt_file_starts_empty(tmp_path) -> None:
     path = tmp_path / "people.json"
     path.write_text("{not json", encoding="utf-8")
     assert PersonStore(path=str(path)).people == {}
+
+
+# ---- 権限（#100: 顔の埋め込みと名前を他のユーザーに読ませない）----
+
+
+def _mode(path) -> int:
+    import os
+    import stat
+
+    return stat.S_IMODE(os.stat(path).st_mode)
+
+
+def test_saved_file_is_owner_only(tmp_path) -> None:
+    path = tmp_path / "data" / "people.json"
+    store = PersonStore(path=str(path))
+    store.get_or_create(unit(1, 0, 0))
+    assert _mode(path) == 0o600
+    assert _mode(path.parent) == 0o700
+
+
+def test_existing_loose_permissions_are_tightened(tmp_path) -> None:
+    import os
+
+    path = tmp_path / "people.json"
+    PersonStore(path=str(path)).get_or_create(unit(1, 0, 0))
+    os.chmod(path, 0o644)
+    os.chmod(tmp_path, 0o755)
+    PersonStore(path=str(path))  # 読み込むだけでも直す
+    assert _mode(path) == 0o600
+    assert _mode(tmp_path) == 0o700
+
+
+def test_save_does_not_follow_planted_symlink(tmp_path) -> None:
+    import os
+
+    path = tmp_path / "people.json"
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    os.symlink(victim, f"{path}.tmp")  # 一時ファイルの名前に罠を仕掛けておく
+    PersonStore(path=str(path)).get_or_create(unit(1, 0, 0))
+    assert victim.read_text() == "keep"
+    assert not path.is_symlink()
+    assert _mode(path) == 0o600

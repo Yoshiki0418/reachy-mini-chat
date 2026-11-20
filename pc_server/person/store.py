@@ -6,8 +6,10 @@ MVP なのでグラフDBではなく単一 JSON。スレッド安全のため mu
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import tempfile
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -42,9 +44,19 @@ class PersonStore:
         self._load()
 
     # ---- 永続化 ----
+    def _restrict_permissions(self) -> None:
+        """顔の埋め込みと名前を他のユーザーに読ませない（ディレクトリ 0700・ファイル 0600）。"""
+        directory = os.path.dirname(self.path) or "."
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        os.chmod(directory, 0o700)  # 既存のディレクトリは makedirs の mode が効かない
+        # シンボリックリンクはたどらない（リンク先の権限を変えてしまうため）
+        if os.path.isfile(self.path) and not os.path.islink(self.path):
+            os.chmod(self.path, 0o600)
+
     def _load(self) -> None:
         if not os.path.exists(self.path):
             return
+        self._restrict_permissions()  # 以前の版が 0644 で書いたファイルも直す
         try:
             with open(self.path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -55,16 +67,24 @@ class PersonStore:
             print(f"[person] ストア読込失敗（新規で開始）: {e}", flush=True)
 
     def _save_locked(self) -> None:
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        tmp = f"{self.path}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(
-                {"people": [asdict(p) for p in self.people.values()]},
-                f,
-                ensure_ascii=False,
-                indent=2,
-            )
-        os.replace(tmp, self.path)
+        self._restrict_permissions()
+        directory = os.path.dirname(self.path) or "."
+        # mkstemp は新しい名前を排他的に作る（O_EXCL）。権限は最初から 0600 で、
+        # 既存のファイルやシンボリックリンクを開いて上書きすることはない
+        fd, tmp = tempfile.mkstemp(dir=directory, prefix=".people.", suffix=".tmp")
+        try:
+            with open(fd, "w", encoding="utf-8") as f:
+                json.dump(
+                    {"people": [asdict(p) for p in self.people.values()]},
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            os.replace(tmp, self.path)  # rename はリンクをたどらず、名前ごと置き換える
+        except BaseException:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(tmp)
+            raise
 
     # ---- 同定 ----
     def identify(self, emb: np.ndarray) -> Person | None:
