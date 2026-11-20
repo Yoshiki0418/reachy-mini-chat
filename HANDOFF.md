@@ -32,7 +32,7 @@ Reachy Mini Wireless と自然言語で会話するプロジェクト。
 ```
 
 - **プロトコル:** 1 turn = 1 HTTP POST。ストリーミングではない
-- **Robot ↔ PC:** 同一 Wi-Fi サブネット、mDNS で PC を解決 (`yoshikinoMacBook-Air.local`)
+- **Robot ↔ PC:** 同一 Wi-Fi サブネット、mDNS で PC を解決 (`<PC のホスト名>.local`)
 - **STT を PC に置いた理由:** RPi CM4 上の faster-whisper (tiny/base int8) が 5s 音声に 20-30s かかり、実時間会話に耐えない。Mac (Apple Silicon) で Whisper base なら 0.3-1.5s
 - **VAD:** Reachy Mini 内蔵の XMOS XVF3800 が発話検出付き。`mini.media.get_DoA()` の `is_speech` を採用
 
@@ -63,7 +63,7 @@ Reachy Mini Wireless と自然言語で会話するプロジェクト。
 ## 4. ファイル構成
 
 ```
-/Users/yoshiki/app/reachy-mini-chat/
+~/reachy-mini-chat/
 ├── HANDOFF.md                   # この資料
 ├── pyproject.toml               # PC 側依存 (uv 管理)
 ├── uv.lock
@@ -100,14 +100,14 @@ Reachy Mini Wireless と自然言語で会話するプロジェクト。
 ### 5.1 PC 側 (macOS Apple Silicon 前提)
 
 ```bash
-cd /Users/yoshiki/app/reachy-mini-chat
+cd ~/reachy-mini-chat
 uv sync                  # .venv 作成 (Python 3.12)
 cp .env.example .env
 # .env を編集して OPENAI_API_KEY=sk-... を設定
 ```
 
 **必要な追加準備 (Style-Bert-VITS2 を使う場合):**
-- モデルファイル: `/Users/yoshiki/Downloads/gakucho_ai_v2/` に `G_3700.pth`, `config.json`, `style_vectors.npy` を配置
+- モデルファイル: `<SBV2 モデルのフォルダ>/` に `G_3700.pth`, `config.json`, `style_vectors.npy` を配置
 - 別モデルを使う場合は `.env` の `SBV2_MODEL_DIR` で上書き
 
 ### 5.2 Robot 側 (Reachy Mini Wireless、事前セットアップ済み)
@@ -118,7 +118,7 @@ cp .env.example .env
 
 **PC 側で変更したコードを Robot に反映するには:**
 ```bash
-rsync -avz /Users/yoshiki/app/reachy-mini-chat/robot/ \
+rsync -avz ~/reachy-mini-chat/robot/ \
       pollen@reachy-mini.local:/home/pollen/reachy-mini-chat/robot/
 ```
 
@@ -127,7 +127,7 @@ rsync -avz /Users/yoshiki/app/reachy-mini-chat/robot/ \
 ### 6.1 PC でサーバー起動 (Terminal 1) — WebSocket 版 (現行)
 
 ```bash
-cd /Users/yoshiki/app/reachy-mini-chat
+cd ~/reachy-mini-chat
 uv run uvicorn pc_server.ws_server:app --host 0.0.0.0 --port 8765
 ```
 
@@ -145,9 +145,9 @@ INFO:     Uvicorn running on http://0.0.0.0:8765
 ### 6.2 疎通確認 (Terminal 2)
 
 ```bash
-curl http://yoshikinoMacBook-Air.local:8765/
+curl http://<PC のホスト名>.local:8765/
 # → JSON でモデル情報が返る
-ssh pollen@reachy-mini.local 'curl -s http://yoshikinoMacBook-Air.local:8765/'
+ssh pollen@reachy-mini.local 'curl -s http://<PC のホスト名>.local:8765/'
 # → Robot からも同様に見えるはず
 ```
 
@@ -156,7 +156,7 @@ ssh pollen@reachy-mini.local 'curl -s http://yoshikinoMacBook-Air.local:8765/'
 ```bash
 # 現行: WebSocket + Motion Executor 版
 ssh pollen@reachy-mini.local \
-  'PC_HOST=yoshikinoMacBook-Air.local /venvs/apps_venv/bin/python -u /home/pollen/reachy-mini-chat/robot/conversation_ws.py'
+  'PC_HOST=<PC のホスト名>.local /venvs/apps_venv/bin/python -u /home/pollen/reachy-mini-chat/robot/conversation_ws.py'
 ```
 
 Robot に話しかけると、応答が文単位で逐次再生され、必要に応じて首/アンテナのモーションが再生される。
@@ -190,7 +190,7 @@ Ctrl+C で終了 (SSH 経由で残るときは `pkill -9 -f conversation_ws.py`)
 
 | 項目 | 値 |
 |---|---|
-| PC ホスト | `yoshikinoMacBook-Air.local` (mDNS) |
+| PC ホスト | `<PC のホスト名>.local` (mDNS) |
 | Robot ホスト | `reachy-mini.local` (mDNS) |
 | Robot SSH | `pollen@reachy-mini.local`、鍵認証 |
 | サーバー port | 8765 |
@@ -293,7 +293,7 @@ OPENAI_API_KEY=sk-...
 # 任意 (デフォルトあり)
 WHISPER_MODEL=base                                    # tiny/base/small/medium/large
 OPENAI_MODEL=gpt-4o-mini                              # gpt-4o, gpt-4o-mini 等
-SBV2_MODEL_DIR=/Users/yoshiki/Downloads/gakucho_ai_v2 # G_*.pth の入ったフォルダ
+SBV2_MODEL_DIR=<SBV2 モデルのフォルダ> # G_*.pth の入ったフォルダ
 SBV2_LENGTH=1.1                                       # 発話速度 (大きいほど遅い)
 ```
 

@@ -28,6 +28,8 @@ FAKE_GH = "ghp_" + "a" * 36
         (f"token: {FAKE_GH}", "GitHub トークン"),
         ("-----BEGIN OPENSSH " + "PRIVATE KEY-----", "秘密鍵"),
         ("PC は 192." + "168.11.135", "LAN の IP アドレス"),
+        ("PC_HOST=taros-Mac" + "Book-Air.local", "個人の端末名"),
+        ("cd /Us" + "ers/taro/app", "ホームディレクトリのパス"),
         ("host 10." + "0.0.12", "LAN の IP アドレス"),
     ],
 )

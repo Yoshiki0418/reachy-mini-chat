@@ -3,7 +3,7 @@
 mini.media のDoA `is_speech` を使って発話区間を検出 → PC側サーバーに送信 → 返却されたWAVを再生。
 
 実行:
-    PC_HOST=yoshikinoMacBook-Air.local /venvs/apps_venv/bin/python robot/conversation.py
+    PC_HOST=<PC のホスト名>.local /venvs/apps_venv/bin/python robot/conversation.py
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 from reachy_mini import ReachyMini
 
-PC_HOST = os.environ.get("PC_HOST", "yoshikinoMacBook-Air.local")
+PC_HOST = os.environ.get("PC_HOST", "localhost")  # PC の mDNS 名などを環境変数で渡す
 PC_PORT = int(os.environ.get("PC_PORT", "8765"))
 SERVER_URL = f"http://{PC_HOST}:{PC_PORT}/turn"
 

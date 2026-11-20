@@ -26,7 +26,7 @@ def get_tts(provider: str | None = None) -> BaseTTS:
     if provider == "style-bert-vits2":
         from pc_server.sbv2_tts import StyleBertVITS2TTS
 
-        model_dir = os.environ.get("SBV2_MODEL_DIR", "/Users/yoshiki/Downloads/gakucho_ai_v2")
+        model_dir = os.environ.get("SBV2_MODEL_DIR", "models/sbv2")
         length = float(os.environ.get("SBV2_LENGTH", "1.1"))
         return StyleBertVITS2TTS(model_dir=model_dir, length=length)
     raise ValueError(f"Unknown TTS provider: {provider}")
