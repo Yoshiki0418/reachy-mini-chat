@@ -31,6 +31,12 @@ CONTENT_RULES: list[tuple[str, re.Pattern[str]]] = [
         "LAN の IP アドレス",
         re.compile(r"\b(?:192\.168|10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b"),
     ),
+    # 個人の端末名・ホームのパスは、ユーザー名と LAN 上の端末の手がかりになる
+    (
+        "個人の端末名",
+        re.compile(r"\b[\w-]*(?:MacBook|iMac|Mac-mini)[\w-]*\.local\b", re.IGNORECASE),
+    ),
+    ("ホームディレクトリのパス", re.compile(r"/Users/(?!<)[A-Za-z0-9._-]+/")),
 ]
 
 # パスで禁止するもの（顔データ・人物 DB・環境変数・モデル重み）。

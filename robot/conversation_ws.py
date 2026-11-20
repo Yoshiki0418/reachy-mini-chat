@@ -5,7 +5,7 @@ VAD で発話区間を検出 → PC へ送信 → 文単位で返る音声チャ
 motion 指示を Motion Executor で実行する。
 
 実行:
-    PC_HOST=yoshikinoMacBook-Air.local /venvs/apps_venv/bin/python robot/conversation_ws.py
+    PC_HOST=<PC のホスト名>.local /venvs/apps_venv/bin/python robot/conversation_ws.py
 
 依存: websockets (apps_venv に導入済み: 15.x)
 """
@@ -31,7 +31,7 @@ from websockets.sync.client import connect
 
 GAZE_ENABLED = os.environ.get("GAZE_ENABLED", "1") == "1"
 
-PC_HOST = os.environ.get("PC_HOST", "yoshikinoMacBook-Air.local")
+PC_HOST = os.environ.get("PC_HOST", "localhost")  # PC の mDNS 名などを環境変数で渡す
 PC_PORT = int(os.environ.get("PC_PORT", "8765"))
 WS_URL = f"ws://{PC_HOST}:{PC_PORT}/ws/session"
 

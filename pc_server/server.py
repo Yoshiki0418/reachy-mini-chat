@@ -33,7 +33,7 @@ load_dotenv()
 
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-SBV2_MODEL_DIR = os.environ.get("SBV2_MODEL_DIR", "/Users/yoshiki/Downloads/gakucho_ai_v2")
+SBV2_MODEL_DIR = os.environ.get("SBV2_MODEL_DIR", "models/sbv2")
 SBV2_LENGTH = float(os.environ.get("SBV2_LENGTH", "1.1"))
 SAMPLE_RATE = 16000  # Robotとmini.mediaの整合性のため16kHzに揃える
 
