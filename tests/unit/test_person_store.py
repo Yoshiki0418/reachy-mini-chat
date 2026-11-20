@@ -97,3 +97,16 @@ def test_existing_loose_permissions_are_tightened(tmp_path) -> None:
     PersonStore(path=str(path))  # 読み込むだけでも直す
     assert _mode(path) == 0o600
     assert _mode(tmp_path) == 0o700
+
+
+def test_save_does_not_follow_planted_symlink(tmp_path) -> None:
+    import os
+
+    path = tmp_path / "people.json"
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    os.symlink(victim, f"{path}.tmp")  # 一時ファイルの名前に罠を仕掛けておく
+    PersonStore(path=str(path)).get_or_create(unit(1, 0, 0))
+    assert victim.read_text() == "keep"
+    assert not path.is_symlink()
+    assert _mode(path) == 0o600

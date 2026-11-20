@@ -6,8 +6,10 @@ MVP なのでグラフDBではなく単一 JSON。スレッド安全のため mu
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import tempfile
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -47,7 +49,8 @@ class PersonStore:
         directory = os.path.dirname(self.path) or "."
         os.makedirs(directory, mode=0o700, exist_ok=True)
         os.chmod(directory, 0o700)  # 既存のディレクトリは makedirs の mode が効かない
-        if os.path.exists(self.path):
+        # シンボリックリンクはたどらない（リンク先の権限を変えてしまうため）
+        if os.path.isfile(self.path) and not os.path.islink(self.path):
             os.chmod(self.path, 0o600)
 
     def _load(self) -> None:
@@ -65,18 +68,23 @@ class PersonStore:
 
     def _save_locked(self) -> None:
         self._restrict_permissions()
-        tmp = f"{self.path}.tmp"
-        # 最初から 0600 で作る（書いてから chmod すると、その間は他人に読める）
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        os.fchmod(fd, 0o600)  # 既に一時ファイルがあった場合、O_CREAT の mode は効かない
-        with open(fd, "w", encoding="utf-8") as f:
-            json.dump(
-                {"people": [asdict(p) for p in self.people.values()]},
-                f,
-                ensure_ascii=False,
-                indent=2,
-            )
-        os.replace(tmp, self.path)
+        directory = os.path.dirname(self.path) or "."
+        # mkstemp は新しい名前を排他的に作る（O_EXCL）。権限は最初から 0600 で、
+        # 既存のファイルやシンボリックリンクを開いて上書きすることはない
+        fd, tmp = tempfile.mkstemp(dir=directory, prefix=".people.", suffix=".tmp")
+        try:
+            with open(fd, "w", encoding="utf-8") as f:
+                json.dump(
+                    {"people": [asdict(p) for p in self.people.values()]},
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            os.replace(tmp, self.path)  # rename はリンクをたどらず、名前ごと置き換える
+        except BaseException:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(tmp)
+            raise
 
     # ---- 同定 ----
     def identify(self, emb: np.ndarray) -> Person | None:
