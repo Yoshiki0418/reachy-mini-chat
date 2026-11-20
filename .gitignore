@@ -18,4 +18,5 @@ coverage.xml
 junit.xml
 .pytest_cache/
 .venv-ci/
-models/
+# モデルの重み（リポジトリ直下だけ。pc_server/models/ はソース）
+/models/

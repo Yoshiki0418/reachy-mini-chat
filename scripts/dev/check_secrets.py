@@ -34,7 +34,7 @@ CONTENT_RULES: list[tuple[str, re.Pattern[str]]] = [
     # 個人の端末名・ホームのパスは、ユーザー名と LAN 上の端末の手がかりになる
     (
         "個人の端末名",
-        re.compile(r"\b[\w-]+-(?:MacBook|iMac|Mac-mini)[\w-]*\.local\b", re.IGNORECASE),
+        re.compile(r"\b[\w-]*(?:MacBook|iMac|Mac-mini)[\w-]*\.local\b", re.IGNORECASE),
     ),
     ("ホームディレクトリのパス", re.compile(r"/Users/(?!<)[A-Za-z0-9._-]+/")),
 ]
