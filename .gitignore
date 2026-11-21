@@ -20,3 +20,6 @@ junit.xml
 .venv-ci/
 # モデルの重み（リポジトリ直下だけ。pc_server/models/ はソース）
 /models/
+
+# ベンチの出力（scripts/bench/。結果の要約は docs/benchmarks.md に書く）
+/bench_out/
