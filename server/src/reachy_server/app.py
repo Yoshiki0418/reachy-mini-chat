@@ -39,6 +39,10 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await store.checkpointer()
+        # 重いモデルは起動時に読み込む（最初の発話で待たせない）。必要なプロバイダだけが持つ口
+        warm = getattr(providers.tts, "warm", None)
+        if warm is not None:
+            await warm()
         pruner = asyncio.create_task(store.prune_forever(retention))
         try:
             yield
@@ -47,6 +51,9 @@ def create_app(
             with contextlib.suppress(asyncio.CancelledError):
                 await pruner
             await store.close()
+            close = getattr(providers.tts, "close", None)
+            if close is not None:
+                await close()
 
     app = FastAPI(title="reachy-server", version=settings.server_version, lifespan=lifespan)
 

@@ -51,6 +51,20 @@ class ServerSettings(BaseSettings):
     stt_beam_size: int = Field(default=1, ge=1)
     stt_hotwords: str | None = Field(default=None, description="認識させたい語（例: リーチ）")
 
+    # tts=irodori のとき。Irodori-TTS は専用の環境（<irodori_dir>/.venv）でワーカーとして動かす
+    irodori_dir: str = "~/Irodori-TTS"
+    tts_checkpoint: str = "Aratako/Irodori-TTS-v4.1-Small-MF"
+    tts_precision: str = Field(default="fp32", pattern="^(fp32|bf16)$")
+    tts_num_steps: int | None = Field(default=None, ge=1, description="未指定ならモデルの既定")
+    tts_ref_wav: str = Field(
+        default="data/server/voice/reference.wav",
+        description="話者の参照音声。声を固定する。実在の人の声は使わない",
+    )
+    tts_caption: str = ""
+    tts_sample_rate: int = Field(default=24000, ge=8000, le=48000)
+    tts_timeout_s: float = Field(default=10.0, gt=0, description="1 文の合成の上限")
+    tts_startup_timeout_s: float = Field(default=300.0, gt=0, description="モデルの読み込み")
+
     # llm=openai のとき（API キーは標準の OPENAI_API_KEY）
     openai_model: str = "gpt-4o-mini"
     llm_temperature: float = Field(default=0.7, ge=0, le=2)
