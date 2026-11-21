@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
 
 from langchain_core.messages import (
@@ -75,8 +77,13 @@ class Summarizer:
     def __init__(self, llm: LLMProvider, checkpointer: BaseCheckpointSaver) -> None:  # pyright: ignore[reportMissingTypeArgument,reportUnknownParameterType]
         self._llm = llm
         self._saver = checkpointer
-        self._done: dict[str, int] = {}
-        """要約済みのスレッドと、そのときの発言数。同じ内容を二重に要約しない。"""
+        self._done: dict[str, str] = {}
+        """要約済みのスレッドと、そのときの会話の指紋。同じ内容を二重に要約しない。
+
+        発言数ではなく内容で見る。忘れた後に同じ長さの別の会話をしても、要約が飛ばされないように。
+        """
+        self._locks: dict[str, asyncio.Lock] = {}
+        """スレッドごとの鍵。同じスレッドの要約が同時に走っても、LLM を二重に呼ばない。"""
 
     async def messages(self, thread_id: str) -> list[AnyMessage]:
         tup = await self._saver.aget_tuple({"configurable": {"thread_id": thread_id}})
@@ -85,14 +92,17 @@ class Summarizer:
         return list(tup.checkpoint["channel_values"].get("messages", []))
 
     async def summarize_thread(self, thread_id: str) -> str | None:
-        turns = dialogue(await self.messages(thread_id))
-        # 相手が一言も話していない（こちらの挨拶だけ）なら、覚えておくことはない
-        if not any(who == "相手" for who, _ in turns):
-            return None
-        if self._done.get(thread_id) == len(turns):
-            return None
-        reply = await self._llm.chat_model().ainvoke(
-            [SystemMessage(SUMMARY_PROMPT), HumanMessage(render(turns))]
-        )
-        self._done[thread_id] = len(turns)
-        return clean_summary(reply.text)
+        async with self._locks.setdefault(thread_id, asyncio.Lock()):
+            turns = dialogue(await self.messages(thread_id))
+            # 相手が一言も話していない（こちらの挨拶だけ）なら、覚えておくことはない
+            if not any(who == "相手" for who, _ in turns):
+                return None
+            transcript = render(turns)
+            fingerprint = hashlib.sha256(transcript.encode()).hexdigest()
+            if self._done.get(thread_id) == fingerprint:
+                return None
+            reply = await self._llm.chat_model().ainvoke(
+                [SystemMessage(SUMMARY_PROMPT), HumanMessage(transcript)]
+            )
+            self._done[thread_id] = fingerprint
+            return clean_summary(reply.text)

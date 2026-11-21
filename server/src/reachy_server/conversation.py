@@ -120,6 +120,8 @@ class Conversation:
         self.robot_id = robot_id
         self._forget_history = forget_history
         self._summarize = summarize
+        self._summaries: dict[str, asyncio.Task[None]] = {}
+        """要約中のタスク（人ごと）。二重に走らせず、忘れられたら取り消す。"""
         self._last_day: dict[str, date] = {}
         """この接続で最後に話した日（人ごと）。退出のとき、どの日のスレッドを要約するか。"""
         self.overheard = overheard or OverheardBuffer(ttl_s=0)
@@ -172,7 +174,7 @@ class Conversation:
             self._on_tool_result(item)
         elif isinstance(item, SessionClose):
             # 要約は LLM を呼ぶので時間がかかる。受信ループを止めない（memory.ack も同じ口で届く）
-            self._spawn(self._summarize_session(item.person_id))
+            self._start_summary(item.person_id)
         else:
             return False
         return True
@@ -219,6 +221,10 @@ class Conversation:
         turn = self._turn
         if turn is not None and not turn.ended and turn.person_id == person_id:
             self._forgotten_during_turn.add(person_id)
+        # 要約の途中なら止める。そのまま終わると、忘れた会話の要約を add_episode で送ってしまう
+        summary = self._summaries.pop(person_id, None)
+        if summary is not None and not summary.done():
+            summary.cancel()
         await self._delete_history(person_id)
 
     async def _delete_history(self, person_id: str) -> None:
@@ -233,6 +239,20 @@ class Conversation:
             await self._delete_history(person_id)
 
     # ------------------------------------------------------------ 退出と要約（設計書 §2.2）
+
+    def _start_summary(self, person_id: str) -> None:
+        running = self._summaries.get(person_id)
+        if running is not None and not running.done():
+            log.debug("summary already running person=%s", person_id)  # 退出の合図が重なった
+            return
+        task = self._spawn(self._summarize_session(person_id))
+        self._summaries[person_id] = task
+
+        def forget_task(t: asyncio.Task[None]) -> None:
+            if self._summaries.get(person_id) is t:
+                del self._summaries[person_id]
+
+        task.add_done_callback(forget_task)
 
     async def _summarize_session(self, person_id: str) -> None:
         """相手の退出で、その日の会話を要約し、memory.op(add_episode) でロボットに保存させる。"""

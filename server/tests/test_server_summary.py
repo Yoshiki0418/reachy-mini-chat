@@ -286,3 +286,116 @@ async def test_close_without_a_summarizer_is_ignored() -> None:
     assert await conv.handle(SessionClose(person_id="p1"))
     await asyncio.sleep(0.05)
     assert not [m for m in sent if isinstance(m, MemoryOp)]
+
+
+# ---------------------------------------------------------------- 忘却・二重の退出（Codex の指摘）
+
+
+class SlowSummaryLLM:
+    """要約に時間がかかる LLM。同時に走ったかを数える。"""
+
+    name = "slow"
+
+    def __init__(self, delay_s: float = 0.2) -> None:
+        self.delay_s = delay_s
+        self.calls = 0
+
+    def chat_model(self) -> object:
+        outer = self
+
+        class Model:
+            async def ainvoke(self, _messages: object) -> AIMessage:
+                outer.calls += 1
+                await asyncio.sleep(outer.delay_s)
+                return AIMessage("卒論の話をしていた。")
+
+        return Model()
+
+
+async def test_concurrent_summaries_of_one_thread_call_the_llm_once() -> None:
+    store = HistoryStore()
+    await talk(store, FakeLLM(["やあ。", "そうなんだ。"]), "こんにちは", "卒論をやってる")
+    llm = SlowSummaryLLM()
+    summarizer = Summarizer(llm, await store.checkpointer())  # pyright: ignore[reportArgumentType]
+    results = await asyncio.gather(
+        summarizer.summarize_thread(THREAD), summarizer.summarize_thread(THREAD)
+    )
+    assert llm.calls == 1
+    assert sorted(results, key=lambda r: r is None) == ["卒論の話をしていた。", None]
+
+
+async def test_a_different_conversation_of_the_same_length_is_still_summarized() -> None:
+    # 忘れた後に、同じ発言数の別の会話をしても、要約が飛ばされない
+    store = HistoryStore()
+    await talk(store, FakeLLM(["やあ。", "そうなんだ。"]), "こんにちは", "猫を飼ってる")
+    summarizer = Summarizer(FakeLLM(["猫の話をしていた。"]), await store.checkpointer())
+    assert await summarizer.summarize_thread(THREAD) is not None
+    await store.delete_thread(THREAD)  # 忘れられた
+    await talk(store, FakeLLM(["やあ。", "いいね。"]), "こんにちは", "犬を飼ってる")
+    assert await summarizer.summarize_thread(THREAD) is not None
+
+
+async def test_forgetting_during_a_pending_summary_cancels_it() -> None:
+    cancelled: list[bool] = []
+    release = asyncio.Event()
+
+    async def summarize(thread_id: str) -> str | None:
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+        return "忘れたはずの会話の要約"
+
+    sent: list[object] = []
+    conv = conversation(sent, summarize)
+    await greet(conv)
+    await conv.handle(SessionClose(person_id="p1"))
+    await asyncio.sleep(0.05)  # 要約中
+    await conv.forget_person("p1")  # person.forget が届く
+    release.set()
+    await asyncio.sleep(0.1)
+    assert cancelled == [True]
+    assert not [m for m in sent if isinstance(m, MemoryOp)]  # 忘れた会話を add_episode で送らない
+    assert not conv._summaries  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_forgetting_someone_else_keeps_the_summary_running() -> None:
+    sent: list[object] = []
+
+    async def summarize(thread_id: str) -> str | None:
+        await asyncio.sleep(0.1)
+        return "話していた。"
+
+    conv = conversation(sent, summarize)
+    await greet(conv)
+    await conv.handle(SessionClose(person_id="p1"))
+    await asyncio.sleep(0.02)
+    await conv.forget_person("p9")
+    await asyncio.sleep(0.2)
+    await conv.handle(MemoryAck(op_id="m1", result="applied"))
+    assert [m.op for m in sent if isinstance(m, MemoryOp)] == ["add_episode"]
+
+
+async def test_overlapping_session_close_sends_one_episode() -> None:
+    calls: list[str] = []
+
+    async def summarize(thread_id: str) -> str | None:
+        calls.append(thread_id)
+        await asyncio.sleep(0.1)
+        return "話していた。"
+
+    sent: list[object] = []
+    conv = conversation(sent, summarize)
+    await greet(conv)
+    await conv.handle(SessionClose(person_id="p1"))
+    await conv.handle(SessionClose(person_id="p1"))  # 退出の合図が重なった
+    await asyncio.sleep(0.2)
+    await conv.handle(MemoryAck(op_id="m1", result="applied"))
+    assert len(calls) == 1
+    assert [m.op for m in sent if isinstance(m, MemoryOp)] == ["add_episode"]
+    await asyncio.sleep(0.05)
+    # 終わったあとの退出は、また要約できる
+    await conv.handle(SessionClose(person_id="p1"))
+    await asyncio.sleep(0.2)
+    assert len(calls) == 2
