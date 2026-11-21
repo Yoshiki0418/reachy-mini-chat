@@ -93,12 +93,17 @@ def pin_free_gpu(
     """空いている GPU を選んで `CUDA_VISIBLE_DEVICES` に入れる。
 
     すでに `CUDA_VISIBLE_DEVICES` が設定されていれば、それに従う（手で選びたいとき用）。
+    手で選んだ番号も nvidia-smi の番号として扱うので、`CUDA_DEVICE_ORDER` が未設定なら
+    PCI_BUS_ID にそろえる。別の並び順が指定されていれば、どの GPU か特定できないので None を返す。
     戻り値は（選んだ GPU、計測時の全 GPU の状況）。条件を満たす GPU がなければ SystemExit。
     """
     env = os.environ if env is None else env
     gpus = query_gpus()
     preset = env.get("CUDA_VISIBLE_DEVICES")
     if preset is not None:
+        env.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+        if env["CUDA_DEVICE_ORDER"] != "PCI_BUS_ID":
+            return None, gpus
         chosen = next((g for g in gpus if str(g.index) == preset.strip()), None)
         return chosen, gpus
     chosen = choose_free_gpu(gpus, min_free_mib=min_free_mib)

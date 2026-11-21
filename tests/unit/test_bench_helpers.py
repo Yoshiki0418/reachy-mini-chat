@@ -86,7 +86,17 @@ def test_pin_free_gpu_respects_manual_choice(monkeypatch: pytest.MonkeyPatch) ->
     env = {"CUDA_VISIBLE_DEVICES": "0"}
     chosen, _ = gpu.pin_free_gpu(min_free_mib=12000, env=env)
     assert chosen is not None and chosen.index == 0
-    assert env == {"CUDA_VISIBLE_DEVICES": "0"}
+    # 手で選んだ番号も nvidia-smi の番号として効くよう、並び順をそろえる
+    assert env == {"CUDA_VISIBLE_DEVICES": "0", "CUDA_DEVICE_ORDER": "PCI_BUS_ID"}
+
+
+def test_pin_free_gpu_manual_choice_with_other_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 別の並び順が指定されていたら、番号から GPU を特定しない（報告を間違えないため）
+    monkeypatch.setattr(gpu, "query_gpus", lambda: gpu.parse_gpu_query(SMI_BUSY0))
+    env = {"CUDA_VISIBLE_DEVICES": "0", "CUDA_DEVICE_ORDER": "FASTEST_FIRST"}
+    chosen, _ = gpu.pin_free_gpu(min_free_mib=12000, env=env)
+    assert chosen is None
+    assert env == {"CUDA_VISIBLE_DEVICES": "0", "CUDA_DEVICE_ORDER": "FASTEST_FIRST"}
 
 
 def test_pin_free_gpu_exits_when_nothing_fits(monkeypatch: pytest.MonkeyPatch) -> None:

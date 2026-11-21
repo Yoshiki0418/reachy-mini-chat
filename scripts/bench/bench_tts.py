@@ -11,8 +11,8 @@ Irodori-TTS は torch / torchcodec の版がワークスペースと合わない
 - `voices`: キャプション（声の説明文）だけから声を作り、候補の音声を書き出す。実在の人の声は
   複製しない（モデルカードの利用条件）。
 - `speed`: 設定（チェックポイント・精度・ステップ数）ごとに、受付で話す文を 1 文ずつ合成して
-  時間と VRAM を測る。書き出した `manifest.jsonl` を `bench_stt.py --manifest` に渡すと、
-  合成音声の聞き取りやすさ（CER）が測れる。
+  時間と VRAM を測る。出力は回ごとに `<out>/speed-<日時>/` へ書く。そこの `manifest.jsonl` を
+  `bench_stt.py --manifest` に渡すと、合成音声の聞き取りやすさ（CER）が測れる。
 
 Irodori-TTS の場所は IRODORI_DIR（既定 ~/Irodori-TTS）。GPU は起動時に空いているものを選ぶ。
 """
@@ -220,7 +220,8 @@ def cmd_speed(args: argparse.Namespace, ir: dict[str, Any]) -> list[dict[str, An
         "ref+caption": {"caption": args.caption, "ref_wav": ref},
     }
     rows: list[dict[str, Any]] = []
-    manifest = (args.out / "manifest.jsonl").open("a", encoding="utf-8")
+    # 回ごとの出力先（main が用意する）。前の回の音声や行が混ざらないよう、毎回新しく書く
+    manifest = (args.out / "manifest.jsonl").open("w", encoding="utf-8")
     for cfg_name in args.configs:
         cfg = CONFIGS[cfg_name]
         print(f"== {cfg_name}: {cfg}", flush=True)
@@ -333,7 +334,12 @@ def main() -> None:
     ir = _import_irodori(irodori_dir)
     import torch  # pyright: ignore[reportMissingImports]
 
+    stamp = time.strftime("%Y%m%d-%H%M%S")
     args.out.mkdir(parents=True, exist_ok=True)
+    if args.cmd == "speed":
+        # 回ごとに別のディレクトリへ書く（同じ --out で回し直しても、音声と manifest が混ざらない）
+        args.out = args.out / f"speed-{stamp}"
+        args.out.mkdir()
     rows = cmd_voices(args, ir) if args.cmd == "voices" else cmd_speed(args, ir)
     result = {
         "cmd": args.cmd,
@@ -343,7 +349,6 @@ def main() -> None:
         "args": {k: str(v) for k, v in vars(args).items()},
         "rows": rows,
     }
-    stamp = time.strftime("%Y%m%d-%H%M%S")
     out = args.out / f"tts-{args.cmd}-{stamp}.json"
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"保存: {out}")
