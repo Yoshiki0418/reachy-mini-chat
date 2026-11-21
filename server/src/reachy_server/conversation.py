@@ -19,6 +19,8 @@ from reachy_protocol.framing import BinaryHeader
 from reachy_protocol.messages import (
     Error,
     FloorDecision,
+    MemoryAck,
+    MemoryOp,
     Message,
     Motion,
     ProactiveRequest,
@@ -33,7 +35,14 @@ from reachy_protocol.messages import (
 
 from .overheard import OverheardBuffer
 from .providers import STTProvider, TTSProvider
-from .responder import ReplyMotion, ReplySentence, Responder, TurnRequest
+from .responder import (
+    MemoryOpName,
+    MemoryResult,
+    ReplyMotion,
+    ReplySentence,
+    Responder,
+    TurnRequest,
+)
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +77,8 @@ class ConversationLimits:
     """文字起こしを送ってから floor.decision を待つ時間。過ぎたら発話を破棄する。"""
     max_utterance_s: float = 30.0
     """1 発話の音声の上限（超えたら受信をやめてエラー）。"""
+    memory_ack_timeout_s: float = 3.0
+    """memory.op を送ってから memory.ack を待つ時間。"""
 
 
 class Conversation:
@@ -95,6 +106,8 @@ class Conversation:
         self._turn: _Turn | None = None
         self._turn_seq = 0
         self._tasks: set[asyncio.Task[None]] = set()
+        self._op_seq = 0
+        self._pending_ops: dict[str, asyncio.Future[MemoryAck]] = {}
 
     # ------------------------------------------------------------ 入口
 
@@ -123,12 +136,47 @@ class Conversation:
             )
         elif isinstance(item, TurnCancel):
             await self._on_cancel(item)
+        elif isinstance(item, MemoryAck):
+            self._on_memory_ack(item)
         else:
             return False
         return True
 
     def _common(self) -> dict[str, Any]:
-        return {"robot_id": self.robot_id, "overheard": self.overheard.recent()}
+        return {
+            "robot_id": self.robot_id,
+            "overheard": self.overheard.recent(),
+            "memory": self._memory_op,
+        }
+
+    # ------------------------------------------------------------ 記憶操作（設計書 §2.4）
+
+    async def _memory_op(self, person_id: str, op: MemoryOpName, value: str | None) -> MemoryResult:
+        """memory.op を送り、ロボットの検証結果（memory.ack）を待つ。
+
+        人物の記憶の正はロボット。サーバーは操作を発行するだけで、結果が applied になるまで
+        「覚えた」とは扱わない（時間内に返事がなければ timeout）。
+        """
+        self._op_seq += 1
+        op_id = f"m{self._op_seq}"
+        waiter: asyncio.Future[MemoryAck] = asyncio.get_running_loop().create_future()
+        self._pending_ops[op_id] = waiter
+        try:
+            await self._send(MemoryOp(op_id=op_id, person_id=person_id, op=op, value=value))
+            ack = await asyncio.wait_for(waiter, self.limits.memory_ack_timeout_s)
+        except TimeoutError:
+            log.warning("memory.ack timeout op=%s", op_id)
+            return MemoryResult("timeout")
+        finally:
+            self._pending_ops.pop(op_id, None)
+        return MemoryResult(ack.result, ack.reason)
+
+    def _on_memory_ack(self, ack: MemoryAck) -> None:
+        waiter = self._pending_ops.get(ack.op_id)
+        if waiter is None or waiter.done():
+            log.debug("memory.ack for unknown or finished op=%s", ack.op_id)  # 行き違い
+            return
+        waiter.set_result(ack)
 
     async def close(self) -> None:
         """接続の終了。進行中の処理をすべて止める（相手はもういないので何も送らない）。"""

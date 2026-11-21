@@ -6,11 +6,25 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypeAlias
 
 from reachy_protocol.messages import Emotion, TurnContext
+
+
+@dataclass(frozen=True)
+class MemoryResult:
+    """memory.op に対するロボットの返事。``timeout`` はロボットが時間内に答えなかったこと。"""
+
+    result: Literal["applied", "rejected", "timeout"]
+    reason: str | None = None
+
+
+MemoryOpName: TypeAlias = Literal["set_name", "add_fact", "forget"]
+
+MemoryPort: TypeAlias = Callable[[str, MemoryOpName, str | None], Awaitable[MemoryResult]]
+"""(person_id, op, value) を memory.op としてロボットへ送り、memory.ack を待つ。"""
 
 
 @dataclass(frozen=True)
@@ -26,6 +40,8 @@ class TurnRequest:
     """会話スレッドをロボットごとに分けるため。"""
     overheard: tuple[str, ...] = ()
     """最近まわりで聞こえた、自分宛てではない発話（場の文脈）。"""
+    memory: MemoryPort | None = None
+    """記憶操作の口。None なら（テストなど）記憶ツールは使えない。"""
 
 
 @dataclass(frozen=True)
