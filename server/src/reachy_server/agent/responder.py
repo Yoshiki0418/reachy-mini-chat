@@ -17,8 +17,9 @@ from ..responder import ReplyEvent, ReplyMotion, ReplySentence, TurnRequest
 from ..text import split_completed
 from .graph import build_agent
 from .prompt import render_context, user_message
-from .tools import memory_ctx_var, motion_sink_var
+from .tools import memory_ctx_var, motion_sink_var, robot_tool_ctx_var
 from .tools.memory import MemoryContext
+from .tools.robot import RobotToolContext
 
 RECURSION_LIMIT = 10
 
@@ -50,6 +51,7 @@ class AgentResponder:
         memory_token = memory_ctx_var.set(
             MemoryContext(person_id=person.id if person else None, port=request.memory)
         )
+        robot_token = robot_tool_ctx_var.set(RobotToolContext(port=request.robot_tool))
         tid = thread_id(request)
         try:
             config: RunnableConfig = {
@@ -86,6 +88,8 @@ class AgentResponder:
                 motion_sink_var.reset(token)
             with contextlib.suppress(ValueError):
                 memory_ctx_var.reset(memory_token)
+            with contextlib.suppress(ValueError):
+                robot_tool_ctx_var.reset(robot_token)
 
 
 def _drain(sink: list[str]) -> list[ReplyMotion]:

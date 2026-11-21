@@ -25,6 +25,9 @@ class ServerSettings(BaseSettings):
         default=15.0, gt=0, description="文字起こし後に判定を待つ時間"
     )
     max_utterance_s: float = Field(default=30.0, gt=0, description="1 発話の音声の上限")
+    tool_timeout_s: float = Field(
+        default=1.0, gt=0, description="ロボット側ツール（tool.call）の結果を待つ時間"
+    )
     memory_ack_timeout_s: float = Field(
         default=3.0, gt=0, description="memory.op に対するロボットの memory.ack を待つ時間"
     )

@@ -25,7 +25,6 @@ from reachy_protocol.messages import (
     Ping,
     Pong,
     SessionClose,
-    ToolResult,
     Welcome,
 )
 from reachy_protocol.transport import Transport, TransportClosed
@@ -80,6 +79,7 @@ class Session:
                 decision_timeout_s=self.settings.decision_timeout_s,
                 max_utterance_s=self.settings.max_utterance_s,
                 memory_ack_timeout_s=self.settings.memory_ack_timeout_s,
+                tool_timeout_s=self.settings.tool_timeout_s,
             ),
             robot_id=robot_id,
             overheard=OverheardBuffer(
@@ -170,8 +170,8 @@ class Session:
                 await self.conversation.forget_person(item.person_id)
             else:
                 await self.history.forget_person(self.robot_id or "", item.person_id)
-        elif isinstance(item, ToolResult | SessionClose):
-            # ツール RPC（#23）・要約（#24）で扱う。今は受け取るだけ
+        elif isinstance(item, SessionClose):
+            # 要約（#24）で扱う。今は受け取るだけ
             log.debug("accepted (not yet handled): %s", item)
         else:  # pragma: no cover - 型の上では到達しない
             await self.send(Error(code="bad_message", message=f"未対応のメッセージ: {item}"))

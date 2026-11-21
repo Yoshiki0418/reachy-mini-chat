@@ -14,6 +14,8 @@ from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from pydantic import JsonValue
+
 from reachy_protocol.channel import BinaryFrame, Incoming
 from reachy_protocol.framing import BinaryHeader
 from reachy_protocol.messages import (
@@ -25,6 +27,8 @@ from reachy_protocol.messages import (
     Motion,
     ProactiveRequest,
     Sentence,
+    ToolCall,
+    ToolResult,
     Transcript,
     TurnCancel,
     TurnEnd,
@@ -41,6 +45,7 @@ from .responder import (
     ReplyMotion,
     ReplySentence,
     Responder,
+    ToolOutcome,
     TurnRequest,
 )
 
@@ -85,6 +90,8 @@ class ConversationLimits:
     """1 発話の音声の上限（超えたら受信をやめてエラー）。"""
     memory_ack_timeout_s: float = 3.0
     """memory.op を送ってから memory.ack を待つ時間。"""
+    tool_timeout_s: float = 1.0
+    """tool.call を送ってから tool.result を待つ時間（設計書 §4.2）。"""
 
 
 class Conversation:
@@ -117,6 +124,8 @@ class Conversation:
         self._forgotten_during_turn: set[str] = set()
         self._op_seq = 0
         self._pending_ops: dict[str, asyncio.Future[MemoryAck]] = {}
+        self._call_seq = 0
+        self._pending_calls: dict[str, asyncio.Future[ToolResult]] = {}
 
     # ------------------------------------------------------------ 入口
 
@@ -147,6 +156,8 @@ class Conversation:
             await self._on_cancel(item)
         elif isinstance(item, MemoryAck):
             self._on_memory_ack(item)
+        elif isinstance(item, ToolResult):
+            self._on_tool_result(item)
         else:
             return False
         return True
@@ -156,6 +167,7 @@ class Conversation:
             "robot_id": self.robot_id,
             "overheard": self.overheard.recent(),
             "memory": self._memory_op,
+            "robot_tool": self._robot_tool,
         }
 
     # ------------------------------------------------------------ 記憶操作（設計書 §2.4）
@@ -204,6 +216,33 @@ class Conversation:
         if person_id is not None and person_id in self._forgotten_during_turn:
             self._forgotten_during_turn.discard(person_id)
             await self._delete_history(person_id)
+
+    # ------------------------------------------------------------ ロボット側ツール（設計書 §4.2）
+
+    async def _robot_tool(self, name: str, args: dict[str, JsonValue]) -> ToolOutcome:
+        """tool.call を送り、ロボットの tool.result を待つ。データはロボットにあるので、RPC で引く。"""
+        self._call_seq += 1
+        call_id = f"c{self._call_seq}"
+        waiter: asyncio.Future[ToolResult] = asyncio.get_running_loop().create_future()
+        self._pending_calls[call_id] = waiter
+        try:
+            await self._send(ToolCall(call_id=call_id, name=name, args=args))
+            res = await asyncio.wait_for(waiter, self.limits.tool_timeout_s)
+        except TimeoutError:
+            log.warning("tool.result timeout call=%s name=%s", call_id, name)
+            return ToolOutcome("timeout")
+        finally:
+            self._pending_calls.pop(call_id, None)
+        if not res.ok:
+            return ToolOutcome("error", error=res.error)
+        return ToolOutcome("ok", res.result)
+
+    def _on_tool_result(self, res: ToolResult) -> None:
+        waiter = self._pending_calls.get(res.call_id)
+        if waiter is None or waiter.done():
+            log.debug("tool.result for unknown or finished call=%s", res.call_id)  # 行き違い
+            return
+        waiter.set_result(res)
 
     def _on_memory_ack(self, ack: MemoryAck) -> None:
         waiter = self._pending_ops.get(ack.op_id)
