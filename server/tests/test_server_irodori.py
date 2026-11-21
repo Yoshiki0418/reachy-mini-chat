@@ -23,6 +23,7 @@ from reachy_server.providers.irodori import (
     prepare_text,
     worker_command,
 )
+from reachy_server.providers.irodori_worker import CancelSet
 
 FAKE_WORKER = Path(__file__).with_name("irodori_fake_worker.py")
 
@@ -201,6 +202,35 @@ async def test_close_stops_the_worker(tmp_path: Path) -> None:
     proc = t._worker.proc  # pyright: ignore[reportOptionalMemberAccess]
     await t.close()
     assert proc.returncode is not None
+
+
+# ---------------------------------------------------------------- ワーカーの取消の記録
+
+
+def test_cancel_set_drops_a_queued_request_once() -> None:
+    c = CancelSet()
+    c.add(3)
+    assert c.take(2) is False
+    assert c.take(3) is True
+    assert c.take(3) is False  # 一度効いたら消える
+
+
+def test_cancel_set_does_not_grow_with_cancels_that_arrive_during_synthesis() -> None:
+    # 合成が始まってから届いた取消は take されない。処理し終えた時点で捨てる
+    c = CancelSet()
+    for rid in range(1, 1001):
+        c.add(rid)  # 合成中に取消が届く
+        c.done(rid)  # 処理し終えた
+    assert len(c) == 0
+
+
+def test_cancel_set_keeps_cancels_for_later_requests() -> None:
+    c = CancelSet()
+    c.add(5)
+    c.add(9)
+    c.done(5)  # 5 までは処理した。先の 9 の取消は残す
+    assert len(c) == 1
+    assert c.take(9) is True
 
 
 # ---------------------------------------------------------------- 登録簿

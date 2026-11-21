@@ -31,6 +31,40 @@ from typing import Any
 CANCELLED = "cancelled"
 
 
+class CancelSet:
+    """取り消された要求の ID。読み取りスレッドが足し、合成のスレッドが調べて掃除する。
+
+    要求の ID は増える一方で、要求は届いた順に処理される。なので ID ``n`` の要求を処理し終えたら、
+    ``n`` 以下の取消はもう効く相手がない（合成中に届いた取消、処理済みへの遅れた取消）。
+    それらを捨てるので、割り込みが何度あっても溜まらない。
+    """
+
+    def __init__(self) -> None:
+        self._ids: set[int] = set()
+        self._lock = threading.Lock()
+
+    def add(self, rid: int) -> None:
+        with self._lock:
+            self._ids.add(rid)
+
+    def take(self, rid: int) -> bool:
+        """``rid`` が取り消されていれば True（記録は消す）。"""
+        with self._lock:
+            if rid in self._ids:
+                self._ids.discard(rid)
+                return True
+            return False
+
+    def done(self, rid: int) -> None:
+        """``rid`` までの要求は処理し終えた。"""
+        with self._lock:
+            self._ids = {i for i in self._ids if i > rid}
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._ids)
+
+
 def _log(msg: str) -> None:
     print(f"[irodori-worker] {msg}", file=sys.stderr, flush=True)
 
@@ -128,7 +162,7 @@ class Engine:
         return to_wav_bytes(result.audio, result.sample_rate, self._out_sr), synth_s
 
 
-def _stdin_reader(requests: queue.Queue[dict[str, Any] | None], cancelled: set[int]) -> None:
+def _stdin_reader(requests: queue.Queue[dict[str, Any] | None], cancelled: CancelSet) -> None:
     """標準入力を読み続け、取消はその場で記録する（合成中でも受け取れるように別スレッド）。"""
     for line in sys.stdin:
         line = line.strip()
@@ -163,24 +197,32 @@ def main() -> None:
     _log("ready")
 
     requests: queue.Queue[dict[str, Any] | None] = queue.Queue()
-    cancelled: set[int] = set()
+    cancelled = CancelSet()
     threading.Thread(target=_stdin_reader, args=(requests, cancelled), daemon=True).start()
     while (msg := requests.get()) is not None:
         rid = int(msg["id"])
-        if rid in cancelled:
-            cancelled.discard(rid)
-            channel.send({"id": rid, "ok": False, "error": CANCELLED})
-            continue
         try:
-            wav, synth_s = engine.synthesize(str(msg["text"]))
-        except Exception as e:  # 1 文の失敗でワーカーを落とさない
-            _log(f"synthesis failed: {e!r}")
-            channel.send({"id": rid, "ok": False, "error": repr(e)})
-            continue
-        channel.send(
-            {"id": rid, "ok": True, "nbytes": len(wav), "sr": args.sample_rate, "synth_s": synth_s},
-            wav,
-        )
+            if cancelled.take(rid):
+                channel.send({"id": rid, "ok": False, "error": CANCELLED})
+                continue
+            try:
+                wav, synth_s = engine.synthesize(str(msg["text"]))
+            except Exception as e:  # 1 文の失敗でワーカーを落とさない
+                _log(f"synthesis failed: {e!r}")
+                channel.send({"id": rid, "ok": False, "error": repr(e)})
+                continue
+            channel.send(
+                {
+                    "id": rid,
+                    "ok": True,
+                    "nbytes": len(wav),
+                    "sr": args.sample_rate,
+                    "synth_s": synth_s,
+                },
+                wav,
+            )
+        finally:
+            cancelled.done(rid)  # 合成中に届いた取消も、ここで捨てる
 
 
 if __name__ == "__main__":
