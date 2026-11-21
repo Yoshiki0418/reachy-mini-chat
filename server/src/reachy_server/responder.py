@@ -23,7 +23,7 @@ class MemoryResult:
     reason: str | None = None
 
 
-MemoryOpName: TypeAlias = Literal["set_name", "add_fact", "forget"]
+MemoryOpName: TypeAlias = Literal["set_name", "add_fact", "add_episode", "forget"]
 
 MemoryPort: TypeAlias = Callable[[str, MemoryOpName, str | None], Awaitable[MemoryResult]]
 """(person_id, op, value) を memory.op としてロボットへ送り、memory.ack を待つ。"""
