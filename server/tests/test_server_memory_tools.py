@@ -282,3 +282,162 @@ async def test_conversation_times_out_and_ignores_the_late_ack() -> None:
     assert await port("p1", "forget", None) == MemoryResult("timeout")
     assert await conv.handle(MemoryAck(op_id="m1", result="applied"))  # 行き違いは黙って受け流す
     assert not conv._pending_ops  # pyright: ignore[reportPrivateUsage]
+
+
+# ---------------------------------------------------------------- 忘却と履歴（ターン中の書き戻し）
+
+
+class GatedResponder:
+    """1 文話し、ゲートが開くまで止まり、履歴を書き戻してから最後の 1 文を話す。
+
+    実行中のグラフが、ターンの途中で消された履歴を後から書き戻す状況を作る。
+    """
+
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.gate = asyncio.Event()
+        self.started = asyncio.Event()
+
+    async def respond(self, request: TurnRequest):  # pyright: ignore[reportUnknownParameterType]
+        yield ReplySentence("はい。")
+        self.started.set()
+        await self.gate.wait()
+        self.events.append("write")  # グラフのチェックポイントの書き込み
+        yield ReplySentence("忘れたよ。")
+
+
+def forgetting_conversation(
+    events: list[str], responder: GatedResponder, sent: list[object]
+) -> Conversation:
+    async def send(msg: object) -> None:
+        sent.append(msg)
+
+    async def send_frame(*_a: object) -> None:
+        pass
+
+    async def forget_history(robot_id: str, person_id: str) -> None:
+        events.append(f"delete:{person_id}")
+
+    return Conversation(
+        send=send,  # pyright: ignore[reportArgumentType]
+        send_frame=send_frame,  # pyright: ignore[reportArgumentType]
+        stt=FakeSTT(),
+        tts=FakeTTS(),
+        responder=responder,  # pyright: ignore[reportArgumentType]
+        limits=ConversationLimits(memory_ack_timeout_s=1.0),
+        forget_history=forget_history,
+    )
+
+
+async def start_proactive_turn(conv: Conversation, person: PersonProfile | None = PERSON) -> None:
+    from reachy_protocol.messages import ProactiveRequest
+
+    await conv.handle(
+        ProactiveRequest(intent_id="i1", kind="greet", strategy="first", context=ctx(person))
+    )
+
+
+async def test_forget_during_a_turn_deletes_again_after_the_graph_stops_writing() -> None:
+    events: list[str] = []
+    responder = GatedResponder(events)
+    conv = forgetting_conversation(events, responder, [])
+    await start_proactive_turn(conv)
+    await responder.started.wait()
+
+    await conv.forget_person("p1")  # ターンの途中で person.forget が届く
+    responder.gate.set()  # そのあと、実行中のグラフが履歴を書き戻す
+    await _drain(conv)
+
+    # 書き戻しの後にもう一度消している（最後が delete）
+    assert events == ["delete:p1", "write", "delete:p1"]
+
+
+async def _drain(conv: Conversation) -> None:
+    while conv._tasks:  # pyright: ignore[reportPrivateUsage]
+        await asyncio.gather(*list(conv._tasks), return_exceptions=True)  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_forget_for_someone_else_or_with_no_turn_deletes_once() -> None:
+    events: list[str] = []
+    responder = GatedResponder(events)
+    conv = forgetting_conversation(events, responder, [])
+    await conv.forget_person("p9")  # ターンがない
+    await start_proactive_turn(conv)
+    await responder.started.wait()
+    await conv.forget_person("p9")  # 別の人
+    responder.gate.set()
+    await _drain(conv)
+    assert events == ["delete:p9", "delete:p9", "write"]  # p1 のターンの後に余計な削除はない
+
+
+async def test_a_cancelled_turn_still_cleans_up_after_a_forget() -> None:
+    from reachy_protocol.messages import TurnCancel
+
+    events: list[str] = []
+    responder = GatedResponder(events)
+    sent: list[object] = []
+    conv = forgetting_conversation(events, responder, sent)
+    await start_proactive_turn(conv)
+    await responder.started.wait()
+    await conv.forget_person("p1")
+    await conv.handle(TurnCancel(turn_id="t1"))
+    await _drain(conv)
+    assert events == ["delete:p1", "delete:p1"]  # 取消でも、ターンの後にもう一度消す
+
+
+async def test_forget_op_acknowledged_as_applied_deletes_the_history() -> None:
+    events: list[str] = []
+    conv = forgetting_conversation(events, GatedResponder(events), [])
+    port = conv._common()["memory"]  # pyright: ignore[reportPrivateUsage]
+    task = asyncio.create_task(port("p1", "forget", None))
+    await asyncio.sleep(0.05)
+    await conv.handle(MemoryAck(op_id="m1", result="applied"))
+    assert await task == MemoryResult("applied")
+    assert events == ["delete:p1"]  # ロボットが person.forget を送らなくても消える
+
+
+async def test_forget_op_rejected_keeps_the_history() -> None:
+    events: list[str] = []
+    conv = forgetting_conversation(events, GatedResponder(events), [])
+    port = conv._common()["memory"]  # pyright: ignore[reportPrivateUsage]
+    task = asyncio.create_task(port("p1", "forget", None))
+    await asyncio.sleep(0.05)
+    await conv.handle(MemoryAck(op_id="m1", result="rejected", reason="同意が必要"))
+    assert await task == MemoryResult("rejected", "同意が必要")
+    assert events == []
+
+
+async def test_forget_me_leaves_no_conversation_on_the_server(
+    settings: ServerSettings, token: str
+) -> None:
+    """通し: 実際の履歴ストアで、forget_me の会話がターン後に残らない。"""
+    from reachy_protocol.messages import PersonForget
+    from reachy_server.history import HistoryStore
+
+    store = HistoryStore()
+    person = default_context().person
+    assert person is not None
+    llm = FakeLLM([tool_call("forget_me"), "わかった、忘れるね。"])
+    providers = Providers(stt=FakeSTT(), tts=FakeTTS(), llm=llm)
+    robot_box: list[FakeRobotClient] = []
+
+    def policy(op: MemoryOp) -> tuple[Literal["applied", "rejected"], str | None]:
+        # ロボットは forget を適用し、ack より先に person.forget を送る（ターンの途中）
+        asyncio.get_running_loop().create_task(
+            robot_box[0].ep.send(PersonForget(person_id=op.person_id))
+        )
+        return "applied", None
+
+    async def serve(transport: Transport) -> None:
+        await Session(transport, settings, providers, history=store).run()
+
+    async def scenario(robot: FakeRobotClient) -> None:
+        robot_box.append(robot)
+        t = await robot.say()
+        await robot.decide(t.utt_id, "respond", default_context())
+        turn = await robot.next_turn()
+        assert turn.status == "ok"
+
+    await run_conversation_scenario(serve, scenario, token=token, memory_policy=policy)
+    leftovers = [t for t in await store.thread_ids() if person.id in t]
+    assert leftovers == []

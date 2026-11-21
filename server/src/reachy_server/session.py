@@ -85,6 +85,7 @@ class Session:
             overheard=OverheardBuffer(
                 ttl_s=self.settings.overheard_ttl_s, max_items=self.settings.overheard_max
             ),
+            forget_history=self.history.forget_person,
         )
 
     async def send(self, msg: Message) -> None:
@@ -163,8 +164,12 @@ class Session:
         elif self.conversation is not None and await self.conversation.handle(item):
             pass
         elif isinstance(item, PersonForget):
-            # ロボット側が人物を忘れたら、サーバー側の会話履歴も消す
-            await self.history.forget_person(self.robot_id or "", item.person_id)
+            # ロボット側が人物を忘れたら、サーバー側の会話履歴も消す。進行中のターンが同じ人なら、
+            # ターンが終わってからも消し直す（実行中のグラフが履歴を書き戻さないように）
+            if self.conversation is not None:
+                await self.conversation.forget_person(item.person_id)
+            else:
+                await self.history.forget_person(self.robot_id or "", item.person_id)
         elif isinstance(item, ToolResult | SessionClose):
             # ツール RPC（#23）・要約（#24）で扱う。今は受け取るだけ
             log.debug("accepted (not yet handled): %s", item)
