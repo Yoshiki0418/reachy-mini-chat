@@ -24,7 +24,6 @@ from reachy_protocol.messages import (
     PersonForget,
     Ping,
     Pong,
-    SessionClose,
     Welcome,
 )
 from reachy_protocol.transport import Transport, TransportClosed
@@ -37,6 +36,7 @@ from .history import HistoryStore
 from .overheard import OverheardBuffer
 from .providers import Providers
 from .responder import Responder
+from .summary import Summarizer
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +86,7 @@ class Session:
                 ttl_s=self.settings.overheard_ttl_s, max_items=self.settings.overheard_max
             ),
             forget_history=self.history.forget_person,
+            summarize=Summarizer(self.providers.llm, checkpointer).summarize_thread,
         )
 
     async def send(self, msg: Message) -> None:
@@ -170,9 +171,6 @@ class Session:
                 await self.conversation.forget_person(item.person_id)
             else:
                 await self.history.forget_person(self.robot_id or "", item.person_id)
-        elif isinstance(item, SessionClose):
-            # 要約（#24）で扱う。今は受け取るだけ
-            log.debug("accepted (not yet handled): %s", item)
         else:  # pragma: no cover - 型の上では到達しない
             await self.send(Error(code="bad_message", message=f"未対応のメッセージ: {item}"))
 

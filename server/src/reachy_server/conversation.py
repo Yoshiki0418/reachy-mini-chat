@@ -12,6 +12,7 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import JsonValue
@@ -27,6 +28,7 @@ from reachy_protocol.messages import (
     Motion,
     ProactiveRequest,
     Sentence,
+    SessionClose,
     ToolCall,
     ToolResult,
     Transcript,
@@ -37,6 +39,7 @@ from reachy_protocol.messages import (
     UtteranceEnd,
 )
 
+from .history import person_thread
 from .overheard import OverheardBuffer
 from .providers import STTProvider, TTSProvider
 from .responder import (
@@ -59,6 +62,9 @@ UttState = Literal["receiving", "transcribing", "waiting_decision"]
 
 ForgetHistory = Callable[[str, str], Awaitable[object]]
 """(robot_id, person_id) の会話履歴をすべて消す。"""
+
+SummarizeThread = Callable[[str], Awaitable[str | None]]
+"""会話スレッドを要約する。話題がなければ None。"""
 
 
 @dataclass
@@ -92,6 +98,8 @@ class ConversationLimits:
     """memory.op を送ってから memory.ack を待つ時間。"""
     tool_timeout_s: float = 1.0
     """tool.call を送ってから tool.result を待つ時間（設計書 §4.2）。"""
+    summary_timeout_s: float = 30.0
+    """退出した人の会話の要約を作る時間の上限。"""
 
 
 class Conversation:
@@ -107,9 +115,15 @@ class Conversation:
         robot_id: str = "robot",
         overheard: OverheardBuffer | None = None,
         forget_history: ForgetHistory | None = None,
+        summarize: SummarizeThread | None = None,
     ) -> None:
         self.robot_id = robot_id
         self._forget_history = forget_history
+        self._summarize = summarize
+        self._summaries: dict[str, asyncio.Task[None]] = {}
+        """要約中のタスク（人ごと）。二重に走らせず、忘れられたら取り消す。"""
+        self._last_day: dict[str, date] = {}
+        """この接続で最後に話した日（人ごと）。退出のとき、どの日のスレッドを要約するか。"""
         self.overheard = overheard or OverheardBuffer(ttl_s=0)
         self._send = send
         self._send_frame = send_frame
@@ -158,6 +172,9 @@ class Conversation:
             self._on_memory_ack(item)
         elif isinstance(item, ToolResult):
             self._on_tool_result(item)
+        elif isinstance(item, SessionClose):
+            # 要約は LLM を呼ぶので時間がかかる。受信ループを止めない（memory.ack も同じ口で届く）
+            self._start_summary(item.person_id)
         else:
             return False
         return True
@@ -204,6 +221,10 @@ class Conversation:
         turn = self._turn
         if turn is not None and not turn.ended and turn.person_id == person_id:
             self._forgotten_during_turn.add(person_id)
+        # 要約の途中なら止める。そのまま終わると、忘れた会話の要約を add_episode で送ってしまう
+        summary = self._summaries.pop(person_id, None)
+        if summary is not None and not summary.done():
+            summary.cancel()
         await self._delete_history(person_id)
 
     async def _delete_history(self, person_id: str) -> None:
@@ -216,6 +237,43 @@ class Conversation:
         if person_id is not None and person_id in self._forgotten_during_turn:
             self._forgotten_during_turn.discard(person_id)
             await self._delete_history(person_id)
+
+    # ------------------------------------------------------------ 退出と要約（設計書 §2.2）
+
+    def _start_summary(self, person_id: str) -> None:
+        running = self._summaries.get(person_id)
+        if running is not None and not running.done():
+            log.debug("summary already running person=%s", person_id)  # 退出の合図が重なった
+            return
+        task = self._spawn(self._summarize_session(person_id))
+        self._summaries[person_id] = task
+
+        def forget_task(t: asyncio.Task[None]) -> None:
+            if self._summaries.get(person_id) is t:
+                del self._summaries[person_id]
+
+        task.add_done_callback(forget_task)
+
+    async def _summarize_session(self, person_id: str) -> None:
+        """相手の退出で、その日の会話を要約し、memory.op(add_episode) でロボットに保存させる。"""
+        day = self._last_day.get(person_id)
+        if self._summarize is None or day is None:
+            return  # この接続では話していない（要約する会話がない）
+        turn = self._turn
+        if turn is not None and turn.person_id == person_id and turn.task is not None:
+            await asyncio.wait([turn.task])  # 返答の途中なら、終わってから（履歴が出そろってから）
+        try:
+            summary = await asyncio.wait_for(
+                self._summarize(person_thread(self.robot_id, person_id, day)),
+                self.limits.summary_timeout_s,
+            )
+        except Exception:
+            log.exception("summary failed person=%s", person_id)
+            return
+        if summary:
+            result = await self._memory_op(person_id, "add_episode", summary)
+            if result.result != "applied":
+                log.info("episode not saved person=%s result=%s", person_id, result)
 
     # ------------------------------------------------------------ ロボット側ツール（設計書 §4.2）
 
@@ -359,6 +417,8 @@ class Conversation:
             await self._stop_turn(self._turn)
         self._turn_seq += 1
         person = request.context.person
+        if person is not None:
+            self._last_day[person.id] = request.context.situation.local_time.date()
         turn = _Turn(
             turn_id=f"t{self._turn_seq}", ref=request.ref, person_id=person.id if person else None
         )
