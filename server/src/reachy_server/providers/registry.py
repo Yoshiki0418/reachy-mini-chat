@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
 from .base import LLMProvider, STTProvider, TTSProvider
@@ -140,3 +141,29 @@ def _faster_whisper_stt(settings: ServerSettings) -> STTProvider:
     )
     stt.load()  # 起動時に読み込む。最初の発話で待たせない
     return stt
+
+
+@register_tts("irodori")
+def _irodori_tts(settings: ServerSettings) -> TTSProvider:
+    from ..gpu import pin_free_gpu
+    from .irodori import IrodoriTTS, worker_command  # 標準ライブラリだけだが、使うときだけ
+
+    ref = Path(settings.tts_ref_wav).expanduser()
+    if not ref.is_file() and not settings.tts_caption:
+        raise FileNotFoundError(
+            f"話者の参照音声がない: {ref}（REACHY_SERVER_TTS_REF_WAV か REACHY_SERVER_TTS_CAPTION を設定）"
+        )
+    pin_free_gpu(min_free_mib=settings.gpu_min_free_mib)  # STT が先に選んでいれば、それに従う
+    return IrodoriTTS(
+        worker_command(
+            settings.irodori_dir,
+            checkpoint=settings.tts_checkpoint,
+            precision=settings.tts_precision,
+            ref_wav=str(ref) if ref.is_file() else None,
+            caption=settings.tts_caption or None,
+            num_steps=settings.tts_num_steps,
+            sample_rate=settings.tts_sample_rate,
+        ),
+        timeout_s=settings.tts_timeout_s,
+        startup_timeout_s=settings.tts_startup_timeout_s,
+    )  # モデルの読み込みは app の起動時（warm）
