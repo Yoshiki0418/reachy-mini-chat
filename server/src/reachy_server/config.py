@@ -45,7 +45,9 @@ class ServerSettings(BaseSettings):
     # stt=faster-whisper のとき（既定は docs/benchmarks.md の結論）
     stt_model: str = "kotoba-tech/kotoba-whisper-v2.0-faster"
     stt_device: str = "cuda"
-    stt_compute_type: str = "float16"
+    stt_compute_type: str | None = Field(
+        default=None, description="未指定なら GPU は float16、CPU は int8（CPU は float16 非対応）"
+    )
     stt_beam_size: int = Field(default=1, ge=1)
     stt_hotwords: str | None = Field(default=None, description="認識させたい語（例: リーチ）")
 

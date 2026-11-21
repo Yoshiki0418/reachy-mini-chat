@@ -136,6 +136,12 @@ async def test_does_not_block_the_event_loop() -> None:
     assert len(ticks) == 5
 
 
+def test_compute_type_follows_the_device_unless_overridden() -> None:
+    assert FasterWhisperSTT(device="cuda")._compute_type == "float16"
+    assert FasterWhisperSTT(device="cpu")._compute_type == "int8"  # CPU は float16 非対応
+    assert FasterWhisperSTT(device="cpu", compute_type="float32")._compute_type == "float32"
+
+
 def test_confidence_is_duration_weighted() -> None:
     segs = [Seg("a", 0.0, 3.0, -0.2), Seg("b", 3.0, 4.0, -1.0)]
     assert confidence_from_segments(segs) == pytest.approx(math.exp((3 * -0.2 + 1 * -1.0) / 4))

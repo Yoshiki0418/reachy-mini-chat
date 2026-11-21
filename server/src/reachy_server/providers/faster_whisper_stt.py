@@ -30,6 +30,11 @@ class _Segment(Protocol):
     avg_logprob: float
 
 
+def default_compute_type(device: str) -> str:
+    """CTranslate2 の CPU 実装は float16 に対応していないので、CPU では int8 にする。"""
+    return "float16" if device == "cuda" else "int8"
+
+
 def confidence_from_segments(segments: Iterable[_Segment]) -> float | None:
     """区間ごとの平均対数確率を、長さで重み付けして平均し、確率（0〜1）にする。
 
@@ -84,7 +89,7 @@ class FasterWhisperSTT:
         *,
         model: str = "kotoba-tech/kotoba-whisper-v2.0-faster",
         device: str = "cuda",
-        compute_type: str = "float16",
+        compute_type: str | None = None,
         beam_size: int = 1,
         language: str = "ja",
         hotwords: str | None = None,
@@ -94,7 +99,7 @@ class FasterWhisperSTT:
         self.name = f"faster-whisper:{model.rsplit('/', 1)[-1]}"
         self._model_name = model
         self._device = device
-        self._compute_type = compute_type
+        self._compute_type = compute_type or default_compute_type(device)
         self._beam_size = beam_size
         self._language = language
         self._hotwords = hotwords
