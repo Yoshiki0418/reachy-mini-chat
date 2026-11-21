@@ -10,6 +10,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypeAlias
 
+from pydantic import JsonValue
+
 from reachy_protocol.messages import Emotion, TurnContext
 
 
@@ -28,6 +30,19 @@ MemoryPort: TypeAlias = Callable[[str, MemoryOpName, str | None], Awaitable[Memo
 
 
 @dataclass(frozen=True)
+class ToolOutcome:
+    """ロボット側ツールの結果。``timeout`` は時間内に答えがなかったこと。"""
+
+    status: Literal["ok", "error", "timeout"]
+    result: JsonValue = None
+    error: str | None = None
+
+
+ToolPort: TypeAlias = Callable[[str, dict[str, JsonValue]], Awaitable[ToolOutcome]]
+"""(ツール名, 引数) を tool.call としてロボットへ送り、tool.result を待つ。"""
+
+
+@dataclass(frozen=True)
 class TurnRequest:
     ref: str
     """utt_id か intent_id。"""
@@ -42,6 +57,8 @@ class TurnRequest:
     """最近まわりで聞こえた、自分宛てではない発話（場の文脈）。"""
     memory: MemoryPort | None = None
     """記憶操作の口。None なら（テストなど）記憶ツールは使えない。"""
+    robot_tool: ToolPort | None = None
+    """ロボット側ツールの口。None なら（テストなど）ロボット側ツールは使えない。"""
 
 
 @dataclass(frozen=True)
