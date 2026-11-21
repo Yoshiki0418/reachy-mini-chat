@@ -4,6 +4,7 @@
 > 本書は既存実装（Phase 0〜5: LangGraph + WS + SBV2 + YuNet 視線追従 + 顔ベース人物メモリ）を土台にした **目標アーキテクチャ** と **移行計画** を定める。
 >
 > **改訂 2 (2026-11-18)**: 構成を「ロボット＝フロントエンド / 研究室 GPU サーバー＝生成バックエンド」に変更。
+> **改訂 3 (2026-11-20)**: TTS を Style-Bert-VITS2（学長モデル）から Irodori-TTS（キャプションで作ったオリジナルの声）に変更（§4.3）。GPU マシンの仕様と、モデルの選定（[benchmarks.md](benchmarks.md)）を反映。
 
 ---
 
@@ -36,7 +37,7 @@
 │                                                                    │        │                                                      │
 │  Perception: VAD/DoA(XVF3800) · YuNet · SFace · Tracker · Gaze     │        │  STT  : faster-whisper (GPU)                         │
 │      │                                                             │        │  Agent: LangGraph (LLM はクラウド API / 将来ローカル) │
-│  World Model ─► Social: FloorManager / InitiativePolicy / BargeIn  │  WS    │  TTS  : Style-Bert-VITS2 (GPU, 学長モデル)           │
+│  World Model ─► Social: FloorManager / InitiativePolicy / BargeIn  │  WS    │  TTS  : Irodori-TTS (GPU, オリジナルの声)            │
 │      │                         │                                   │◄──────►│  History: 会話スレッド（person_id × 日付）           │
 │  Memory (SQLite): 人物・顔・来訪・事実・要約 ─► Profile 添付        │ 1接続  │  Server tools: 時刻・天気・(予定)                    │
 │      │                         │                                   │        │  Harness: registry · trace · eval · health           │
@@ -59,7 +60,7 @@
 | 応答生成（LLM・ツールループ） | | ● | |
 | 会話履歴（短中期） | | ● | ユーザー方針。スレッドは person_id × 日付 |
 | 会話要約 | | ●（生成） | 生成した要約はロボットに返して保存する |
-| TTS（SBV2） | | ● | GPU で高速に合成する |
+| TTS（Irodori-TTS） | | ● | GPU で高速に合成する |
 | モーション・音声再生 | ● | | |
 | 研究室の情報を引くツール（来訪状況など） | ●（実行） | ●（呼出） | データはロボットにある → サーバーから RPC で呼ぶ |
 
@@ -75,10 +76,10 @@
 | VAD 終端の確定（ロボット） | 0.4〜0.6 s |
 | 相槌うなずき（ロボット反射） | VAD 終端から 150 ms 未満 |
 | 音声送信（LAN） | < 50 ms |
-| STT（GPU, faster-whisper） | 0.2〜0.5 s |
+| STT（GPU, faster-whisper） | 0.2〜0.5 s（実測 p50 0.11 s・p90 0.14 s、kotoba-whisper-v2.0。[benchmarks.md](benchmarks.md)） |
 | 宛先判定の往復（transcript → decision） | < 30 ms（ルールのみ） |
 | LLM の最初の文 | 0.5〜1.0 s |
-| TTS 最初の文（GPU, SBV2） | 0.1〜0.3 s |
+| TTS 最初の文（GPU, Irodori-TTS） | 0.1〜0.3 s（実測 p50 0.20 s・p90 0.22 s、v4.1-Small-MF） |
 | **合計（体感）** | **2.0 s 以下**。超えそうなときはロボット側のフィラーを先に再生する |
 
 ---
@@ -104,7 +105,7 @@ robot                                              server
   │    decision=respond の場合: context を添付     │
   │◄── turn.start {turn_id} ───────────────────────│  LangGraph 実行
   │◄── sentence {turn_id, idx, text, emotion} ─────│
-  │◄══ audio_out (binary, turn_id, idx) ═══════════│  SBV2 合成
+  │◄══ audio_out (binary, turn_id, idx) ═══════════│  TTS 合成
   │◄── memory.op {op_id, person_id, op, value} ────│  LLM のツール呼び出し
   │── memory.ack {op_id, applied|rejected} ───────►│
   │◄── turn.end {turn_id, status} ─────────────────│
@@ -289,7 +290,7 @@ keyring（DB とは別の 0600 のファイル。全体を AEAD で暗号化）
 |---|---|
 | `api/` | FastAPI。WS `/v1/session`、`/healthz`、`/v1/classify`（宛先判定の補助）、`/metrics` |
 | `session/` | 接続ごとのセッション管理。ターンの状態機械（transcribing → waiting_decision → generating → done / cancelled） |
-| `providers/` | `STTProvider`（faster-whisper GPU / OpenAI / Fake）、`LLMProvider`（OpenAI / 将来ローカル / Fake）、`TTSProvider`（SBV2 / OpenAI / Fake）。registry で選ぶ |
+| `providers/` | `STTProvider`（faster-whisper GPU / OpenAI / Fake）、`LLMProvider`（OpenAI / 将来ローカル / Fake）、`TTSProvider`（Irodori-TTS / OpenAI / Fake）。registry で選ぶ |
 | `agent/` | LangGraph の StateGraph、プロンプト、ツール |
 | `history/` | 会話スレッドの保存（SqliteSaver、thread_id = `robot_id:person_id:date`）、場の文脈の短期バッファ、要約の生成 |
 | `harness/` | トレース（ターン単位のレイテンシ内訳）、記録、評価ランナー |
@@ -309,11 +310,15 @@ START → build_context → respond ⇄ tools → guard → emit → END
 - **emit**: 文と感情タグを TTS に流し、`sentence` と `audio_out` を送る。
 
 ### 4.3 TTS とストリーミング
-- 文が完成するたびに SBV2 で合成して送る（既存の文分割ロジックを流用）。合成の待ち行列は 1 セッション 1 本にし、`turn.cancel` を受けたらすぐ破棄する。
+- TTS は [Irodori-TTS](https://github.com/Aratako/Irodori-TTS)（v4.1-Small 系。コード・重みとも MIT）。文が完成するたびに 1 文ずつ合成して送る（既存の文分割ロジックを流用）。合成の待ち行列は 1 セッション 1 本にし、`turn.cancel` を受けたらすぐ破棄する。使うチェックポイント・ステップ数・精度は [benchmarks.md](benchmarks.md) で決める。
+- **声**: 「可愛い VTuber 風」の声を、キャプション（声と話し方の説明文）から作る。キャプションだけでは呼ぶたびに話者が変わるので、候補からオーナーが選んだ 1 本を話者の参照音声にして、毎回同じ声で合成する（参照の latent はキャッシュされ、使い回すのが一番速い）。実在の人（声優・VTuber など）の声は複製しない（モデルカードの利用条件）。
+- **感情**: エージェントが文ごとに付ける感情タグを、Irodori-TTS の絵文字（😊 楽しげに、😲 驚き、🫶 優しく、🫣 照れながら など）に変換して文に添える。
+- **動かし方**: Irodori-TTS は torch・torchcodec・transformers の版がワークスペースの lock と合わないので、サーバー本体とは別の環境で動かし、`TTSProvider` からローカルで呼ぶ見込み（方式は #19 で決める）。
 - フィラー（「えっとね」など）と、サーバー障害時用の定型挨拶は、サーバーで事前に合成し、起動時にロボットへ配布してキャッシュさせる。
 
 ### 4.4 運用
 - systemd（または Docker Compose）で常駐させる。GPU メモリは STT・TTS のモデルを常駐させて確保する。
+- GPU は研究室の他の人のジョブと共用なので、番号を決め打ちしない。起動時に、空きメモリが足りる GPU のうち使用率の低いものを選ぶ（設定で上書きできるようにする）。
 - `/healthz` でモデルのロード状態を返す。ターンごとの区間レイテンシをログとメトリクスに出す。
 - LLM のキーなどの秘密情報はサーバーだけに置き、ロボットには置かない。
 
@@ -358,7 +363,7 @@ reachy-mini-chat/
   - `lock`: `uv lock --check`
   - `lint`: ruff check / ruff format --check
   - `typecheck`: pyright（`protocol` と判断系は strict から始める）
-  - `test-protocol` / `test-robot` / `test-server`: パッケージごとの pytest。サーバーの ML 依存（torch・faster-whisper・SBV2）は入れない
+  - `test-protocol` / `test-robot` / `test-server`: パッケージごとの pytest。サーバーの ML 依存（torch・faster-whisper・Irodori-TTS）は入れない
   - `contract`: Fake プロバイダで動かした本物のサーバーにロボット側クライアントをつなぎ、シナリオを流す
   - （将来）GPU 結合テスト: 研究室 GPU マシンをセルフホストランナーにし、手動または夜間に実行する
 - **ブランチ運用**: `main` は保護（PR 必須・CI 必須）。ブランチ名は `feat/<issue#>-<slug>`、PR 本文に `Closes #<issue>`。
@@ -389,7 +394,7 @@ Issue はマイルストーンごとに Epic（親 Issue）を立て、作業単
 ## 9. 未決事項（オーナーの判断が必要）
 
 1. **LLM**: 当面はサーバーからクラウド API（OpenAI）を呼ぶ前提。GPU マシンでローカル LLM に置き換えるかは M7 以降に評価する。
-2. **GPU マシンの仕様**: GPU の型と VRAM（STT・SBV2・将来のローカル LLM を同時に載せられるか）。M2 のベンチマークで確認する。
+2. ~~**GPU マシンの仕様**~~ **決定（2026-11-20）**: RTX A6000（48 GB）× 2 の、研究室の共用機。起動時に空いている GPU を選ぶ。STT と TTS を同じ GPU に載せて 7.5 GB（[benchmarks.md](benchmarks.md)）。ローカル LLM を載せるかは、他の人のジョブとの兼ね合いも含めて M7 以降に評価する。
 3. **研究室メンバーの情報**: 名前を事前に登録するか、会話で覚えさせるか（初期は会話で覚える）。
 4. **掲示と同意**: 顔を覚えることの掲示と、オプトアウトの方法。
 5. **場の文脈バッファ**: 自分宛てでない会話を短期だけ保持する機能を有効にするか（既定は 10 分・非永続）。
