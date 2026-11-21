@@ -22,8 +22,12 @@ dev = [
     "pytest-cov>=6.0",
     "httpx>=0.28",  # FastAPI の TestClient（WebSocket の結合テスト）
 ]
-# GPU 推論（faster-whisper / SBV2 / torch）。CI には入れない。中身は #18 / #19 で追加する。
-gpu = []
+# GPU 推論。CI には入れない。TTS（Irodori-TTS）は依存の版が合わないので別環境（#19）。
+gpu = [
+    "faster-whisper==1.2.1",
+    "av>=11,<19",  # 19 で av.open の metadata_errors が消え、faster-whisper の decode_audio が落ちる
+    "nvidia-cublas-cu12>=12.8,<13",  # ctranslate2 が実行時に CUDA 12 の cuBLAS を探す
+]
 
 [tool.uv.sources]
 reachy-protocol = { workspace = true }

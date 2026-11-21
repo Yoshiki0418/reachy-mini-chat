@@ -119,3 +119,24 @@ def _openai_llm(settings: ServerSettings) -> LLMProvider:
         temperature=settings.llm_temperature,
         max_tokens=settings.llm_max_tokens,
     )
+
+
+# ---------------------------------------------------------------- 組み込み（GPU）
+
+
+@register_stt("faster-whisper")
+def _faster_whisper_stt(settings: ServerSettings) -> STTProvider:
+    from ..gpu import pin_free_gpu
+    from .faster_whisper_stt import FasterWhisperSTT  # 使うときだけ読み込む
+
+    if settings.stt_device == "cuda":
+        pin_free_gpu(min_free_mib=settings.gpu_min_free_mib)  # CUDA の初期化より前に選ぶ
+    stt = FasterWhisperSTT(
+        model=settings.stt_model,
+        device=settings.stt_device,
+        compute_type=settings.stt_compute_type,
+        beam_size=settings.stt_beam_size,
+        hotwords=settings.stt_hotwords,
+    )
+    stt.load()  # 起動時に読み込む。最初の発話で待たせない
+    return stt
