@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
+import signal
 import sys
 import wave
 from collections.abc import AsyncIterator
@@ -163,8 +165,30 @@ async def test_crashed_worker_is_restarted_on_the_next_request(tmp_path: Path) -
     t = IrodoriTTS(fake_command(log), timeout_s=2.0)
     try:
         with pytest.raises(WorkerError):
-            await t.synthesize("CRASH")
-        assert await t.synthesize("復旧")
+            await t.synthesize("CRASH")  # 落ちる文は、起こし直してやり直しても落ちる → 失敗
+        assert starts(log) == 2
+        assert await t.synthesize("復旧")  # 次の文は、起こし直されたワーカーで成功する
+        assert starts(log) == 3
+    finally:
+        await t.close()
+
+
+async def test_a_worker_that_died_but_is_not_yet_noticed_is_replaced_without_failing(
+    tmp_path: Path,
+) -> None:
+    # 子プロセスの終了を asyncio が検知するまでには遅れがある（CI で実際に起きた）。
+    # その間に次の文が来ても、1 回目から成功する
+    log = tmp_path / "w.log"
+    t = IrodoriTTS(fake_command(log), timeout_s=2.0)
+    try:
+        await t.warm()
+        worker = t._worker  # pyright: ignore[reportPrivateUsage]
+        assert worker is not None
+        # 死なせて、asyncio が終了を検知する前（returncode は None のまま）に次の文を送る。
+        # os.kill は子プロセスだけを殺し、Process 側の状態更新（wait）は待たない
+        os.kill(worker.proc.pid, signal.SIGKILL)
+        assert worker.proc.returncode is None
+        assert await t.synthesize("すぐ次")
         assert starts(log) == 2
     finally:
         await t.close()

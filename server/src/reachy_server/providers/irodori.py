@@ -81,10 +81,19 @@ class _Worker:
     proc: asyncio.subprocess.Process
     pending: dict[int, asyncio.Future[tuple[dict[str, Any], bytes]]] = field(default_factory=dict)
     reader: asyncio.Task[None] | None = None
+    dead: bool = False  # 標準出力が閉じた。子プロセスの終了の検知より先に分かる
+
+    @property
+    def alive(self) -> bool:
+        return not self.dead and self.proc.returncode is None
 
 
 class WorkerError(RuntimeError):
     pass
+
+
+class _WorkerLost(WorkerError):
+    """応答を返す前にワーカーが終了した（送れなかった場合を含む）。合成は副作用がないので、やり直せる。"""
 
 
 class IrodoriTTS:
@@ -119,7 +128,7 @@ class IrodoriTTS:
     async def _ensure(self) -> _Worker:
         async with self._start_lock:
             worker = self._worker
-            if worker is not None and worker.proc.returncode is None:
+            if worker is not None and worker.alive:
                 return worker
             self._worker = await self._spawn()
             return self._worker
@@ -175,12 +184,22 @@ class IrodoriTTS:
         except (asyncio.IncompleteReadError, ValueError, KeyError):
             log.exception("ワーカーの応答を読めなかった")
         finally:
-            self._fail_pending(worker, WorkerError("ワーカーが終了した"))
+            worker.dead = True
+            self._fail_pending(worker, _WorkerLost("ワーカーが終了した"))
 
     # ---------------------------------------------------------------- 合成
 
     async def synthesize(self, text: str, emotion: Emotion = "neutral") -> bytes:
-        worker = await self._ensure()
+        prepared = prepare_text(text, emotion)
+        try:
+            return await self._request(await self._ensure(), prepared)
+        except _WorkerLost as e:
+            # 子プロセスの終了の検知には遅れがあり、死んだワーカーに送ってしまうことがある。
+            # 起こし直して 1 回だけやり直す（同じ文で 2 回続けて落ちたら、そのまま失敗にする）
+            log.warning("ワーカーが応答の前に終了した。起こし直してやり直す: %s", e)
+            return await self._request(await self._ensure(), prepared)
+
+    async def _request(self, worker: _Worker, text: str) -> bytes:
         rid = next(self._ids)
         fut: asyncio.Future[tuple[dict[str, Any], bytes]] = (
             asyncio.get_running_loop().create_future()
@@ -189,9 +208,14 @@ class IrodoriTTS:
         stdin = worker.proc.stdin
         assert stdin is not None
         try:
-            request = {"id": rid, "text": prepare_text(text, emotion)}
-            stdin.write(json.dumps(request, ensure_ascii=False).encode("utf-8") + b"\n")
-            await stdin.drain()
+            try:
+                stdin.write(
+                    json.dumps({"id": rid, "text": text}, ensure_ascii=False).encode() + b"\n"
+                )
+                await stdin.drain()
+            except (BrokenPipeError, ConnectionResetError) as e:
+                await self._discard(worker)
+                raise _WorkerLost("ワーカーに送れなかった") from e
             header, body = await asyncio.wait_for(fut, self._timeout_s)
         except asyncio.CancelledError:
             self._send_cancel(worker, rid)  # 始めていなければ、ワーカーが捨てる
@@ -200,9 +224,6 @@ class IrodoriTTS:
             log.error("合成が %.1f 秒を超えた。ワーカーを再起動する", self._timeout_s)
             await self._discard(worker)
             raise
-        except (BrokenPipeError, ConnectionResetError) as e:
-            await self._discard(worker)
-            raise WorkerError("ワーカーに送れなかった") from e
         finally:
             worker.pending.pop(rid, None)
         if not header.get("ok"):
