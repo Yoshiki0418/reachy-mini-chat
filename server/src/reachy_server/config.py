@@ -38,6 +38,19 @@ class ServerSettings(BaseSettings):
     tts: str = "fake"
     llm: str = "fake"
 
+    # GPU は研究室の共用機。起動時に、空きメモリが足りる GPU のうち使用率の低いものを選ぶ
+    # （手で選ぶときは CUDA_VISIBLE_DEVICES）。STT・TTS を合わせて載せる分の目安
+    gpu_min_free_mib: int = Field(default=8000, ge=0)
+
+    # stt=faster-whisper のとき（既定は docs/benchmarks.md の結論）
+    stt_model: str = "kotoba-tech/kotoba-whisper-v2.0-faster"
+    stt_device: str = "cuda"
+    stt_compute_type: str | None = Field(
+        default=None, description="未指定なら GPU は float16、CPU は int8（CPU は float16 非対応）"
+    )
+    stt_beam_size: int = Field(default=1, ge=1)
+    stt_hotwords: str | None = Field(default=None, description="認識させたい語（例: リーチ）")
+
     # llm=openai のとき（API キーは標準の OPENAI_API_KEY）
     openai_model: str = "gpt-4o-mini"
     llm_temperature: float = Field(default=0.7, ge=0, le=2)
