@@ -20,7 +20,6 @@ from reachy_protocol.framing import BinaryHeader
 from reachy_protocol.messages import (
     Error,
     Hello,
-    MemoryAck,
     Message,
     PersonForget,
     Ping,
@@ -80,11 +79,13 @@ class Session:
             limits=ConversationLimits(
                 decision_timeout_s=self.settings.decision_timeout_s,
                 max_utterance_s=self.settings.max_utterance_s,
+                memory_ack_timeout_s=self.settings.memory_ack_timeout_s,
             ),
             robot_id=robot_id,
             overheard=OverheardBuffer(
                 ttl_s=self.settings.overheard_ttl_s, max_items=self.settings.overheard_max
             ),
+            forget_history=self.history.forget_person,
         )
 
     async def send(self, msg: Message) -> None:
@@ -163,10 +164,14 @@ class Session:
         elif self.conversation is not None and await self.conversation.handle(item):
             pass
         elif isinstance(item, PersonForget):
-            # ロボット側が人物を忘れたら、サーバー側の会話履歴も消す
-            await self.history.forget_person(self.robot_id or "", item.person_id)
-        elif isinstance(item, MemoryAck | ToolResult | SessionClose):
-            # 記憶操作（#22）・ツール RPC（#23）・要約（#24）で扱う。今は受け取るだけ
+            # ロボット側が人物を忘れたら、サーバー側の会話履歴も消す。進行中のターンが同じ人なら、
+            # ターンが終わってからも消し直す（実行中のグラフが履歴を書き戻さないように）
+            if self.conversation is not None:
+                await self.conversation.forget_person(item.person_id)
+            else:
+                await self.history.forget_person(self.robot_id or "", item.person_id)
+        elif isinstance(item, ToolResult | SessionClose):
+            # ツール RPC（#23）・要約（#24）で扱う。今は受け取るだけ
             log.debug("accepted (not yet handled): %s", item)
         else:  # pragma: no cover - 型の上では到達しない
             await self.send(Error(code="bad_message", message=f"未対応のメッセージ: {item}"))

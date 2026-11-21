@@ -19,6 +19,8 @@ from reachy_protocol.framing import BinaryHeader
 from reachy_protocol.messages import (
     Error,
     FloorDecision,
+    MemoryAck,
+    MemoryOp,
     Message,
     Motion,
     ProactiveRequest,
@@ -33,7 +35,14 @@ from reachy_protocol.messages import (
 
 from .overheard import OverheardBuffer
 from .providers import STTProvider, TTSProvider
-from .responder import ReplyMotion, ReplySentence, Responder, TurnRequest
+from .responder import (
+    MemoryOpName,
+    MemoryResult,
+    ReplyMotion,
+    ReplySentence,
+    Responder,
+    TurnRequest,
+)
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +50,10 @@ SendMessage = Callable[[Message], Awaitable[None]]
 SendFrame = Callable[[BinaryHeader, bytes], Awaitable[None]]
 
 UttState = Literal["receiving", "transcribing", "waiting_decision"]
+
+
+ForgetHistory = Callable[[str, str], Awaitable[object]]
+"""(robot_id, person_id) の会話履歴をすべて消す。"""
 
 
 @dataclass
@@ -57,6 +70,8 @@ class _Utterance:
 class _Turn:
     turn_id: str
     ref: str
+    person_id: str | None = None
+    """このターンの相手。忘れられたとき、ターンが終わってからもう一度履歴を消すため。"""
     task: asyncio.Task[None] | None = None
     ended: bool = False
     """turn.end を送ったか。止めたタスクが送らずに終わったら、代わりに送る。"""
@@ -68,6 +83,8 @@ class ConversationLimits:
     """文字起こしを送ってから floor.decision を待つ時間。過ぎたら発話を破棄する。"""
     max_utterance_s: float = 30.0
     """1 発話の音声の上限（超えたら受信をやめてエラー）。"""
+    memory_ack_timeout_s: float = 3.0
+    """memory.op を送ってから memory.ack を待つ時間。"""
 
 
 class Conversation:
@@ -82,8 +99,10 @@ class Conversation:
         limits: ConversationLimits | None = None,
         robot_id: str = "robot",
         overheard: OverheardBuffer | None = None,
+        forget_history: ForgetHistory | None = None,
     ) -> None:
         self.robot_id = robot_id
+        self._forget_history = forget_history
         self.overheard = overheard or OverheardBuffer(ttl_s=0)
         self._send = send
         self._send_frame = send_frame
@@ -95,6 +114,9 @@ class Conversation:
         self._turn: _Turn | None = None
         self._turn_seq = 0
         self._tasks: set[asyncio.Task[None]] = set()
+        self._forgotten_during_turn: set[str] = set()
+        self._op_seq = 0
+        self._pending_ops: dict[str, asyncio.Future[MemoryAck]] = {}
 
     # ------------------------------------------------------------ 入口
 
@@ -123,12 +145,72 @@ class Conversation:
             )
         elif isinstance(item, TurnCancel):
             await self._on_cancel(item)
+        elif isinstance(item, MemoryAck):
+            self._on_memory_ack(item)
         else:
             return False
         return True
 
     def _common(self) -> dict[str, Any]:
-        return {"robot_id": self.robot_id, "overheard": self.overheard.recent()}
+        return {
+            "robot_id": self.robot_id,
+            "overheard": self.overheard.recent(),
+            "memory": self._memory_op,
+        }
+
+    # ------------------------------------------------------------ 記憶操作（設計書 §2.4）
+
+    async def _memory_op(self, person_id: str, op: MemoryOpName, value: str | None) -> MemoryResult:
+        """memory.op を送り、ロボットの検証結果（memory.ack）を待つ。
+
+        人物の記憶の正はロボット。サーバーは操作を発行するだけで、結果が applied になるまで
+        「覚えた」とは扱わない（時間内に返事がなければ timeout）。
+        """
+        self._op_seq += 1
+        op_id = f"m{self._op_seq}"
+        waiter: asyncio.Future[MemoryAck] = asyncio.get_running_loop().create_future()
+        self._pending_ops[op_id] = waiter
+        try:
+            await self._send(MemoryOp(op_id=op_id, person_id=person_id, op=op, value=value))
+            ack = await asyncio.wait_for(waiter, self.limits.memory_ack_timeout_s)
+        except TimeoutError:
+            log.warning("memory.ack timeout op=%s", op_id)
+            return MemoryResult("timeout")
+        finally:
+            self._pending_ops.pop(op_id, None)
+        if op == "forget" and ack.result == "applied":
+            await self.forget_person(person_id)
+        return MemoryResult(ack.result, ack.reason)
+
+    async def forget_person(self, person_id: str) -> None:
+        """その人の会話履歴をすべて消す（person.forget、または forget の memory.ack を受けたとき）。
+
+        進行中のターンが同じ人のものなら、そのターンが終わってからもう一度消す。ターンの途中で
+        消しても、実行中のグラフが後から履歴を書き戻してしまうため（ターンが終われば書き込みは
+        止まっている）。
+        """
+        turn = self._turn
+        if turn is not None and not turn.ended and turn.person_id == person_id:
+            self._forgotten_during_turn.add(person_id)
+        await self._delete_history(person_id)
+
+    async def _delete_history(self, person_id: str) -> None:
+        if self._forget_history is not None:
+            await self._forget_history(self.robot_id, person_id)
+
+    async def _after_turn(self, turn: _Turn) -> None:
+        """ターンの生成が完全に止まった後の後始末。ターン中に忘れられた人の履歴を消し直す。"""
+        person_id = turn.person_id
+        if person_id is not None and person_id in self._forgotten_during_turn:
+            self._forgotten_during_turn.discard(person_id)
+            await self._delete_history(person_id)
+
+    def _on_memory_ack(self, ack: MemoryAck) -> None:
+        waiter = self._pending_ops.get(ack.op_id)
+        if waiter is None or waiter.done():
+            log.debug("memory.ack for unknown or finished op=%s", ack.op_id)  # 行き違い
+            return
+        waiter.set_result(ack)
 
     async def close(self) -> None:
         """接続の終了。進行中の処理をすべて止める（相手はもういないので何も送らない）。"""
@@ -237,7 +319,10 @@ class Conversation:
         if self._turn is not None:
             await self._stop_turn(self._turn)
         self._turn_seq += 1
-        turn = _Turn(turn_id=f"t{self._turn_seq}", ref=request.ref)
+        person = request.context.person
+        turn = _Turn(
+            turn_id=f"t{self._turn_seq}", ref=request.ref, person_id=person.id if person else None
+        )
         self._turn = turn
         # turn.start はタスクを作る前に送る。タスクが動き出す前に取消されても、
         # 「始まったターンは必ず turn.end で閉じる」を _stop_turn が守れるようにするため
@@ -287,6 +372,8 @@ class Conversation:
             producer.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await producer
+            # 生成はここで完全に止まった。取消で割り込まれても後始末は最後までやる
+            await asyncio.shield(self._after_turn(turn))
         await self._send(TurnEnd(turn_id=turn_id, status=status, error=error))
         turn.ended = True
 

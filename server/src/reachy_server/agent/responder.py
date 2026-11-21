@@ -17,7 +17,8 @@ from ..responder import ReplyEvent, ReplyMotion, ReplySentence, TurnRequest
 from ..text import split_completed
 from .graph import build_agent
 from .prompt import render_context, user_message
-from .tools import motion_sink_var
+from .tools import memory_ctx_var, motion_sink_var
+from .tools.memory import MemoryContext
 
 RECURSION_LIMIT = 10
 
@@ -45,6 +46,10 @@ class AgentResponder:
     async def respond(self, request: TurnRequest) -> AsyncIterator[ReplyEvent]:
         sink: list[str] = []
         token = motion_sink_var.set(sink)
+        person = request.context.person
+        memory_token = memory_ctx_var.set(
+            MemoryContext(person_id=person.id if person else None, port=request.memory)
+        )
         tid = thread_id(request)
         try:
             config: RunnableConfig = {
@@ -79,6 +84,8 @@ class AgentResponder:
             # 別タスクから閉じられた場合は reset できないが、シンクはこのターン限りなので問題ない
             with contextlib.suppress(ValueError):
                 motion_sink_var.reset(token)
+            with contextlib.suppress(ValueError):
+                memory_ctx_var.reset(memory_token)
 
 
 def _drain(sink: list[str]) -> list[ReplyMotion]:
