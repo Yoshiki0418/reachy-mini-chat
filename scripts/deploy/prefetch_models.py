@@ -20,7 +20,7 @@ from reachy_server.providers import build_providers
 async def main() -> int:
     settings = ServerSettings()  # pyright: ignore[reportCallIssue]
     if settings.stt == "faster-whisper":
-        from huggingface_hub import snapshot_download
+        from huggingface_hub import snapshot_download  # pyright: ignore[reportMissingImports]
 
         print(f"STT: {settings.stt_model}", flush=True)
         snapshot_download(repo_id=settings.stt_model)
