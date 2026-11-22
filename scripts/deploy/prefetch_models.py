@@ -2,7 +2,7 @@
 
     uv run python scripts/deploy/prefetch_models.py
 
-- STT: 設定の ``stt_model`` を Hugging Face から取得（GPU は使わない）
+- STT: 設定の ``stt_model`` を取得（別名・Hugging Face の ID。手元のディレクトリなら何もしない。GPU は使わない）
 - TTS: Irodori-TTS のワーカーを 1 回起動し、チェックポイントやコーデックの取得とカーネルの準備まで
   済ませる（GPU を使う。共用機なので、起動時に空いている GPU を自分で選ぶ）
 設定は ``REACHY_SERVER_*``（.env）と同じ。使わない側（stt / tts が fake）は飛ばす。
@@ -20,10 +20,11 @@ from reachy_server.providers import build_providers
 async def main() -> int:
     settings = ServerSettings()  # pyright: ignore[reportCallIssue]
     if settings.stt == "faster-whisper":
-        from huggingface_hub import snapshot_download  # pyright: ignore[reportMissingImports]
+        # 別名（small, large-v3 など）も手元のディレクトリも、本体と同じ解決で扱う
+        from faster_whisper.utils import download_model  # pyright: ignore[reportMissingImports]
 
         print(f"STT: {settings.stt_model}", flush=True)
-        snapshot_download(repo_id=settings.stt_model)
+        download_model(settings.stt_model)
     else:
         print(f"STT は {settings.stt}: 飛ばす", flush=True)
 
