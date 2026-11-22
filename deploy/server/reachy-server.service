@@ -1,0 +1,25 @@
+# Reachy サーバー（研究室 GPU マシン）の systemd ユーザーユニット。手順は deploy/server/README.md。
+#
+# リポジトリは ~/reachy-mini-chat に置く前提（違う場所なら WorkingDirectory と EnvironmentFile を直す）。
+# 秘密情報（REACHY_SERVER_TOKEN、OPENAI_API_KEY）は .env にだけ置き、このファイルには書かない。
+# GPU の番号は決め打ちしない。起動のたびに、空いている GPU をサーバーが自分で選ぶ。
+[Unit]
+Description=Reachy server (STT / LLM / TTS backend)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/reachy-mini-chat
+EnvironmentFile=%h/reachy-mini-chat/.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/uv run --package reachy-server --group gpu python -m reachy_server
+# モデルの読み込みに数十秒かかる。落ちたら起こし直す（続けて落ちるときは止める）
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
