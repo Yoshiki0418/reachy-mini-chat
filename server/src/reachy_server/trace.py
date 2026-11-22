@@ -40,7 +40,7 @@ class TurnTrace:
     stt_s: float | None = None
     """発話の終わり → 文字起こしができるまで（STT の時間。utterance のみ）。"""
     decision_wait_s: float | None = None
-    """文字起こしを送る → ロボットの判定が届くまで（utterance のみ。ロボット側の判断の時間）。"""
+    """文字起こしを送り始める → ロボットの判定が届くまで（utterance のみ。ロボット側の判断の時間）。"""
     marks: dict[str, float] = field(default_factory=dict[str, float])
     tts_first_s: float | None = None
     """最初の文の合成にかかった時間（送信待ちは含まない）。"""

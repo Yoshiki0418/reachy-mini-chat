@@ -82,7 +82,7 @@ class _Utterance:
     """utterance.end を受けた時刻。"""
     stt_s: float | None = None
     t_transcript: float = 0.0
-    """transcript を送り終えた時刻。"""
+    """transcript を送り始めた時刻（判定待ちの起点）。"""
 
 
 @dataclass
@@ -390,6 +390,9 @@ class Conversation:
         utt.stt_s = self._clock() - utt.t_end
         utt.audio = bytearray()  # 判定待ちの間は音声を持たない
         utt.text = result.text
+        # 判定を受け付ける状態にする前に、起点の時刻を決める（送信が終わる前に判定が届いても、
+        # 判定待ちの時間が正しく出るように）
+        utt.t_transcript = self._clock()
         utt.state = "waiting_decision"
         loop = asyncio.get_running_loop()
         utt.expiry = loop.call_later(self.limits.decision_timeout_s, self._expire, utt_id)
@@ -398,7 +401,6 @@ class Conversation:
                 utt_id=utt_id, text=result.text, lang=result.lang, confidence=result.confidence
             )
         )
-        utt.t_transcript = self._clock()
 
     def _expire(self, utt_id: str) -> None:
         log.info("decision timeout utt=%s", utt_id)

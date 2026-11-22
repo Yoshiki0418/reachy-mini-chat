@@ -322,7 +322,9 @@ async def test_felt_latency_includes_time_not_in_any_section() -> None:
     await rig.utter_and_respond(decision_wait_s=0.01)
     await rig.settle()
     (t,) = rig.conv.recent_traces
-    assert t["stt_ms"] == 200.0 and t["decision_wait_ms"] == 10.0  # 各区間は今までどおり
+    assert t["stt_ms"] == 200.0
+    # 判定待ちは「文字起こしを送り始めてから」なので、送信待ちの 0.5 s も含む（どこかの区間に入る）
+    assert t["decision_wait_ms"] == pytest.approx(500 + 10)
     assert t["felt_ms"] == pytest.approx(200 + 500 + 10 + 850)  # 発話の終わり → 第一声の実際の差
 
 
@@ -347,3 +349,25 @@ async def test_a_turn_interrupted_by_a_closed_connection_is_still_traced() -> No
     await rig.conv.close()
     (t,) = rig.conv.recent_traces
     assert t["status"] == "cancelled" and t["turn_id"] == "t1"
+
+
+async def test_a_decision_that_arrives_before_the_transcript_send_returns() -> None:
+    """文字起こしの送信が終わる前にロボットの判定が届いても、判定待ちの時間が正しい。"""
+    rig = Rig(stt_s=0.2, tts_s=0.15, first_s=0.7)
+    send = rig.conv._send  # pyright: ignore[reportPrivateUsage]
+
+    async def fast_robot(msg: Any) -> None:
+        await send(msg)
+        if type(msg).__name__ == "Transcript":
+            rig.clock.advance(0.3)  # ロボットが 0.3 s で判定し、送信の完了より先に届く
+            await rig.conv.handle(FloorDecision(utt_id="u1", decision="respond", context=CTX))
+
+    rig.conv._send = fast_robot  # pyright: ignore[reportPrivateUsage]
+    await rig.conv.handle(UtteranceBegin(utt_id="u1"))
+    header = BinaryHeader(kind="audio_in", ref="u1", seq=0, format="pcm_f32le", sr=16000)
+    await rig.conv.handle(BinaryFrame(header, struct.pack("<16f", *([0.0] * 16))))
+    await rig.conv.handle(UtteranceEnd(utt_id="u1", features=FEAT))
+    await rig.settle()
+    (t,) = rig.conv.recent_traces
+    assert t["decision_wait_ms"] == pytest.approx(300.0)  # 起点が 0 のままなら 10 万 ms になる
+    assert t["felt_ms"] == pytest.approx(200 + 300 + 850)
