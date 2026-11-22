@@ -7,14 +7,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hmac
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket
 
 from reachy_protocol.version import PROTOCOL_VERSION
 
+from .clips import ClipStore
 from .config import ServerSettings
 from .history import HistoryStore
 from .providers import Providers, build_providers
@@ -35,6 +37,13 @@ def create_app(
     providers = providers or build_providers(settings)
     store = history or HistoryStore(settings.history_db or None)
     retention = settings.history_retention_days
+    clips = ClipStore()
+
+    def authorize(authorization: str | None) -> None:
+        expected = settings.token.get_secret_value().encode()
+        scheme, _, given = (authorization or "").partition(" ")
+        if scheme.lower() != "bearer" or not hmac.compare_digest(given.strip().encode(), expected):
+            raise HTTPException(401, "unauthorized", headers={"WWW-Authenticate": "Bearer"})
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -43,6 +52,7 @@ def create_app(
         warm = getattr(providers.tts, "warm", None)
         if warm is not None:
             await warm()
+        await clips.build(providers.tts)  # フィラー・定型挨拶。ロボットが取りに来る
         pruner = asyncio.create_task(store.prune_forever(retention))
         try:
             yield
@@ -64,6 +74,32 @@ def create_app(
             "server_version": settings.server_version,
             "protocol_version": PROTOCOL_VERSION,
         }
+
+    @app.get("/v1/clips")
+    def clip_manifest(  # pyright: ignore[reportUnusedFunction]
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> Response:
+        authorize(authorization)
+        manifest = clips.manifest
+        if manifest is None:
+            raise HTTPException(503, "clips are not ready")
+        etag = f'"{manifest.version}"'
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers={"ETag": etag})
+        return Response(
+            manifest.model_dump_json(), media_type="application/json", headers={"ETag": etag}
+        )
+
+    @app.get("/v1/clips/{clip_id}")
+    def clip_audio(  # pyright: ignore[reportUnusedFunction]
+        clip_id: str, authorization: str | None = Header(default=None)
+    ) -> Response:
+        authorize(authorization)
+        clip = clips.get(clip_id)
+        if clip is None:
+            raise HTTPException(404, "no such clip")
+        return Response(clip.wav, media_type="audio/wav", headers={"ETag": f'"{clip.info.sha256}"'})
 
     @app.websocket("/v1/session")
     async def session(ws: WebSocket) -> None:  # pyright: ignore[reportUnusedFunction]
