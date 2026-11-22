@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
+from collections import deque
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import date
@@ -51,6 +53,7 @@ from .responder import (
     ToolOutcome,
     TurnRequest,
 )
+from .trace import Clock, TurnTrace
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +78,11 @@ class _Utterance:
     audio: bytearray = field(default_factory=bytearray)
     text: str = ""
     expiry: asyncio.TimerHandle | None = None
+    t_end: float = 0.0
+    """utterance.end を受けた時刻。"""
+    stt_s: float | None = None
+    t_transcript: float = 0.0
+    """transcript を送り始めた時刻（判定待ちの起点）。"""
 
 
 @dataclass
@@ -84,6 +92,7 @@ class _Turn:
     person_id: str | None = None
     """このターンの相手。忘れられたとき、ターンが終わってからもう一度履歴を消すため。"""
     task: asyncio.Task[None] | None = None
+    trace: TurnTrace | None = None
     ended: bool = False
     """turn.end を送ったか。止めたタスクが送らずに終わったら、代わりに送る。"""
 
@@ -116,12 +125,16 @@ class Conversation:
         overheard: OverheardBuffer | None = None,
         forget_history: ForgetHistory | None = None,
         summarize: SummarizeThread | None = None,
+        clock: Clock = time.perf_counter,
     ) -> None:
         self.robot_id = robot_id
         self._forget_history = forget_history
         self._summarize = summarize
         self._summaries: dict[str, asyncio.Task[None]] = {}
         """要約中のタスク（人ごと）。二重に走らせず、忘れられたら取り消す。"""
+        self._clock = clock
+        self.recent_traces: deque[dict[str, Any]] = deque(maxlen=100)
+        """直近のターンのトレース（reachy_server.trace のログと同じ内容）。"""
         self._last_day: dict[str, date] = {}
         """この接続で最後に話した日（人ごと）。退出のとき、どの日のスレッドを要約するか。"""
         self.overheard = overheard or OverheardBuffer(ttl_s=0)
@@ -363,6 +376,7 @@ class Conversation:
             await self._error("unknown_ref", "開いていない発話の終了", msg.utt_id)
             return
         utt.state = "transcribing"
+        utt.t_end = self._clock()
         self._spawn(self._transcribe(msg.utt_id, utt))
 
     async def _transcribe(self, utt_id: str, utt: _Utterance) -> None:
@@ -373,8 +387,12 @@ class Conversation:
             self._drop(utt_id)
             await self._error("internal", "文字起こしに失敗した", utt_id)
             return
+        utt.stt_s = self._clock() - utt.t_end
         utt.audio = bytearray()  # 判定待ちの間は音声を持たない
         utt.text = result.text
+        # 判定を受け付ける状態にする前に、起点の時刻を決める（送信が終わる前に判定が届いても、
+        # 判定待ちの時間が正しく出るように）
+        utt.t_transcript = self._clock()
         utt.state = "waiting_decision"
         loop = asyncio.get_running_loop()
         utt.expiry = loop.call_later(self.limits.decision_timeout_s, self._expire, utt_id)
@@ -406,12 +424,22 @@ class Conversation:
             self.overheard.add(utt.text)
             return
         await self._start_turn(
-            TurnRequest(ref=msg.utt_id, context=msg.context, user_text=utt.text, **self._common())
+            TurnRequest(ref=msg.utt_id, context=msg.context, user_text=utt.text, **self._common()),
+            stt_s=utt.stt_s,
+            decision_wait_s=self._clock() - utt.t_transcript,
+            t_speech_end=utt.t_end,
         )
 
     # ------------------------------------------------------------ ターン
 
-    async def _start_turn(self, request: TurnRequest) -> None:
+    async def _start_turn(
+        self,
+        request: TurnRequest,
+        *,
+        stt_s: float | None = None,
+        decision_wait_s: float | None = None,
+        t_speech_end: float | None = None,
+    ) -> None:
         # 同時に 2 つは話さない。進行中のターンは閉じてから始める
         if self._turn is not None:
             await self._stop_turn(self._turn)
@@ -419,8 +447,17 @@ class Conversation:
         person = request.context.person
         if person is not None:
             self._last_day[person.id] = request.context.situation.local_time.date()
+        turn_id = f"t{self._turn_seq}"
+        trace = TurnTrace(
+            turn_id,
+            request.ref,
+            "utterance" if request.user_text is not None else "proactive",
+            clock=self._clock,
+        )
+        trace.stt_s, trace.decision_wait_s = stt_s, decision_wait_s
+        trace.t_speech_end = t_speech_end
         turn = _Turn(
-            turn_id=f"t{self._turn_seq}", ref=request.ref, person_id=person.id if person else None
+            turn_id=turn_id, ref=request.ref, person_id=person.id if person else None, trace=trace
         )
         self._turn = turn
         # turn.start はタスクを作る前に送る。タスクが動き出す前に取消されても、
@@ -437,6 +474,12 @@ class Conversation:
         if not turn.ended:
             await self._send(TurnEnd(turn_id=turn.turn_id, status="cancelled"))
             turn.ended = True
+            # タスクが動き出す前に取消された（_run_turn が最後まで走らなかった）ターンも記録する
+            self._finish_trace(turn, "cancelled")
+
+    def _finish_trace(self, turn: _Turn, status: str) -> None:
+        if turn.trace is not None and (summary := turn.trace.emit(status)) is not None:
+            self.recent_traces.append(summary)
 
     async def _on_cancel(self, msg: TurnCancel) -> None:
         turn = self._turn
@@ -450,16 +493,22 @@ class Conversation:
         status: Literal["ok", "cancelled", "error"] = "ok"
         error: str | None = None
         queue: asyncio.Queue[ReplySentence | None] = asyncio.Queue()
-        producer = asyncio.create_task(self._produce(turn_id, request, queue))
+        producer = asyncio.create_task(self._produce(turn, request, queue))
         try:
             idx = 0
             while (item := await queue.get()) is not None:
                 await self._send(
                     Sentence(turn_id=turn_id, idx=idx, text=item.text, emotion=item.emotion)
                 )
+                t_tts = self._clock()
                 wav = await self.tts.synthesize(item.text, item.emotion)
+                if turn.trace is not None:
+                    # 合成の時間は、送る前に確定する（通信が詰まっても TTS のせいにしない）
+                    turn.trace.synthesized(self._clock() - t_tts)
                 header = BinaryHeader(kind="audio_out", ref=turn_id, seq=idx, format="wav_pcm16")
                 await self._send_frame(header, wav)
+                if turn.trace is not None:
+                    turn.trace.mark("first_audio")
                 idx += 1
             await producer  # 生成側の例外をここで受ける
         except asyncio.CancelledError:
@@ -473,17 +522,23 @@ class Conversation:
                 await producer
             # 生成はここで完全に止まった。取消で割り込まれても後始末は最後までやる
             await asyncio.shield(self._after_turn(turn))
-        await self._send(TurnEnd(turn_id=turn_id, status=status, error=error))
-        turn.ended = True
+        try:
+            await self._send(TurnEnd(turn_id=turn_id, status=status, error=error))
+            turn.ended = True
+        finally:
+            # 接続が閉じて turn.end を送れなくても、トレースは残す
+            self._finish_trace(turn, status)
 
     async def _produce(
-        self, turn_id: str, request: TurnRequest, queue: asyncio.Queue[ReplySentence | None]
+        self, turn: _Turn, request: TurnRequest, queue: asyncio.Queue[ReplySentence | None]
     ) -> None:
         try:
             async for event in self.responder.respond(request):
                 if isinstance(event, ReplyMotion):
-                    await self._send(Motion(turn_id=turn_id, name=event.name))
+                    await self._send(Motion(turn_id=turn.turn_id, name=event.name))
                 else:
+                    if turn.trace is not None:
+                        turn.trace.mark("first_sentence")
                     await queue.put(event)
         finally:
             await queue.put(None)

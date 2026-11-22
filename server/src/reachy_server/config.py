@@ -18,6 +18,9 @@ class ServerSettings(BaseSettings):
     token: SecretStr = Field(description="ロボットと共有する認証トークン（必須）", min_length=16)
     host: str = "0.0.0.0"
     port: int = Field(default=8765, ge=1, le=65535)
+    log_level: str = Field(
+        default="INFO", pattern="^(?i:debug|info|warning|error)$", description="ログの出力レベル"
+    )
     server_version: str = __version__
     handshake_timeout_s: float = Field(default=10.0, gt=0, description="接続から hello までの猶予")
 
