@@ -425,6 +425,7 @@ class Conversation:
             TurnRequest(ref=msg.utt_id, context=msg.context, user_text=utt.text, **self._common()),
             stt_s=utt.stt_s,
             decision_wait_s=self._clock() - utt.t_transcript,
+            t_speech_end=utt.t_end,
         )
 
     # ------------------------------------------------------------ ターン
@@ -435,6 +436,7 @@ class Conversation:
         *,
         stt_s: float | None = None,
         decision_wait_s: float | None = None,
+        t_speech_end: float | None = None,
     ) -> None:
         # 同時に 2 つは話さない。進行中のターンは閉じてから始める
         if self._turn is not None:
@@ -451,6 +453,7 @@ class Conversation:
             clock=self._clock,
         )
         trace.stt_s, trace.decision_wait_s = stt_s, decision_wait_s
+        trace.t_speech_end = t_speech_end
         turn = _Turn(
             turn_id=turn_id, ref=request.ref, person_id=person.id if person else None, trace=trace
         )
@@ -517,9 +520,12 @@ class Conversation:
                 await producer
             # 生成はここで完全に止まった。取消で割り込まれても後始末は最後までやる
             await asyncio.shield(self._after_turn(turn))
-        await self._send(TurnEnd(turn_id=turn_id, status=status, error=error))
-        turn.ended = True
-        self._finish_trace(turn, status)
+        try:
+            await self._send(TurnEnd(turn_id=turn_id, status=status, error=error))
+            turn.ended = True
+        finally:
+            # 接続が閉じて turn.end を送れなくても、トレースは残す
+            self._finish_trace(turn, status)
 
     async def _produce(
         self, turn: _Turn, request: TurnRequest, queue: asyncio.Queue[ReplySentence | None]

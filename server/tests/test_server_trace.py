@@ -306,3 +306,44 @@ def test_log_level_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REACHY_SERVER_LOG_LEVEL", "loud")
     with pytest.raises(ValueError):
         ServerSettings()  # pyright: ignore[reportCallIssue]
+
+
+async def test_felt_latency_includes_time_not_in_any_section() -> None:
+    """文字起こしの送信待ちなど、どの区間にも入らない時間も、体感の遅れに入る。"""
+    rig = Rig(stt_s=0.2, tts_s=0.15, first_s=0.7)
+    send = rig.conv._send  # pyright: ignore[reportPrivateUsage]
+
+    async def slow_send(msg: Any) -> None:
+        if type(msg).__name__ == "Transcript":
+            rig.clock.advance(0.5)  # 送信ロック・バックプレッシャで待たされた
+        await send(msg)
+
+    rig.conv._send = slow_send  # pyright: ignore[reportPrivateUsage]
+    await rig.utter_and_respond(decision_wait_s=0.01)
+    await rig.settle()
+    (t,) = rig.conv.recent_traces
+    assert t["stt_ms"] == 200.0 and t["decision_wait_ms"] == 10.0  # 各区間は今までどおり
+    assert t["felt_ms"] == pytest.approx(200 + 500 + 10 + 850)  # 発話の終わり → 第一声の実際の差
+
+
+async def test_a_turn_interrupted_by_a_closed_connection_is_still_traced() -> None:
+    """ロボットが切断して turn.end を送れなくても、トレースが残る。"""
+    from reachy_protocol.transport import TransportClosed
+
+    gate = asyncio.Event()
+    rig = Rig(gate=gate)
+    send = rig.conv._send  # pyright: ignore[reportPrivateUsage]
+    closed = False
+
+    async def maybe_closed(msg: Any) -> None:
+        if closed:
+            raise TransportClosed("closed")
+        await send(msg)
+
+    rig.conv._send = maybe_closed  # pyright: ignore[reportPrivateUsage]
+    await rig.conv.handle(ProactiveRequest(intent_id="i1", kind="greet", strategy="x", context=CTX))
+    await asyncio.sleep(0.02)
+    closed = True  # 接続が閉じた
+    await rig.conv.close()
+    (t,) = rig.conv.recent_traces
+    assert t["status"] == "cancelled" and t["turn_id"] == "t1"

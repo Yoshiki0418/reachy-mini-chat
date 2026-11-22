@@ -35,8 +35,10 @@ class TurnTrace:
     kind: str  # "utterance"（発話への応答）か "proactive"（自発発話）
     clock: Clock = time.perf_counter
     t_start: float = 0.0
+    t_speech_end: float | None = None
+    """発話の終わり（utterance.end を受けた時刻。utterance のみ）。体感の遅れの起点。"""
     stt_s: float | None = None
-    """発話の終わり → 文字起こしを送るまで（utterance のみ）。"""
+    """発話の終わり → 文字起こしができるまで（STT の時間。utterance のみ）。"""
     decision_wait_s: float | None = None
     """文字起こしを送る → ロボットの判定が届くまで（utterance のみ。ロボット側の判断の時間）。"""
     marks: dict[str, float] = field(default_factory=dict[str, float])
@@ -70,9 +72,13 @@ class TurnTrace:
         first_audio = self.since_start("first_audio")
         total = self.clock() - self.t_start
         # 話し終えてから第一声まで（体感の遅れ）。ロボット側の判定の時間を含む
-        felt: float | None = None
-        if self.stt_s is not None and self.decision_wait_s is not None and first_audio is not None:
-            felt = self.stt_s + self.decision_wait_s + first_audio
+        # 区間の足し算ではなく、時刻の差で出す（文字起こしの送信待ちなど、どの区間にも入らない時間も含む）
+        t_first_audio = self.marks.get("first_audio")
+        felt = (
+            t_first_audio - self.t_speech_end
+            if t_first_audio is not None and self.t_speech_end is not None
+            else None
+        )
         return {
             "event": "turn_trace",
             "turn_id": self.turn_id,
