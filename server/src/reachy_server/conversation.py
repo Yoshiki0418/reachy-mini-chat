@@ -469,6 +469,12 @@ class Conversation:
         if not turn.ended:
             await self._send(TurnEnd(turn_id=turn.turn_id, status="cancelled"))
             turn.ended = True
+            # タスクが動き出す前に取消された（_run_turn が最後まで走らなかった）ターンも記録する
+            self._finish_trace(turn, "cancelled")
+
+    def _finish_trace(self, turn: _Turn, status: str) -> None:
+        if turn.trace is not None and (summary := turn.trace.emit(status)) is not None:
+            self.recent_traces.append(summary)
 
     async def _on_cancel(self, msg: TurnCancel) -> None:
         turn = self._turn
@@ -491,12 +497,13 @@ class Conversation:
                 )
                 t_tts = self._clock()
                 wav = await self.tts.synthesize(item.text, item.emotion)
+                if turn.trace is not None:
+                    # 合成の時間は、送る前に確定する（通信が詰まっても TTS のせいにしない）
+                    turn.trace.synthesized(self._clock() - t_tts)
                 header = BinaryHeader(kind="audio_out", ref=turn_id, seq=idx, format="wav_pcm16")
                 await self._send_frame(header, wav)
                 if turn.trace is not None:
                     turn.trace.mark("first_audio")
-                    turn.trace.tts_total_s += self._clock() - t_tts
-                    turn.trace.sentences += 1
                 idx += 1
             await producer  # 生成側の例外をここで受ける
         except asyncio.CancelledError:
@@ -512,8 +519,7 @@ class Conversation:
             await asyncio.shield(self._after_turn(turn))
         await self._send(TurnEnd(turn_id=turn_id, status=status, error=error))
         turn.ended = True
-        if turn.trace is not None:
-            self.recent_traces.append(turn.trace.emit(status))
+        self._finish_trace(turn, status)
 
     async def _produce(
         self, turn: _Turn, request: TurnRequest, queue: asyncio.Queue[ReplySentence | None]

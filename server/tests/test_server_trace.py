@@ -219,3 +219,90 @@ def test_marks_record_only_the_first_time() -> None:
     trace.mark("first_audio")  # 2 文目以降では更新しない
     assert trace.since_start("first_audio") == pytest.approx(0.3)
     assert trace.since_start("first_sentence") is None
+
+
+# ---------------------------------------------------------------- レビュー指摘（Codex）
+
+
+async def test_slow_sending_is_not_counted_as_synthesis() -> None:
+    """通信が詰まって音声を送るのに時間がかかっても、TTS の時間には含めない。"""
+    rig = Rig(tts_s=0.15, first_s=0.7)
+
+    async def slow_send_frame(header: BinaryHeader, payload: bytes) -> None:
+        rig.clock.advance(0.5)  # 送信待ち（バックプレッシャ）
+
+    rig.conv._send_frame = slow_send_frame  # pyright: ignore[reportPrivateUsage]
+    await rig.utter_and_respond()
+    await rig.settle()
+    (t,) = rig.conv.recent_traces
+    assert t["tts_first_ms"] == 150.0  # 合成だけ
+    assert t["tts_total_ms"] == 150.0
+    assert t["first_audio_ms"] == pytest.approx(700 + 150 + 500)  # 第一声は送り終えるまで
+
+
+async def test_turn_cancelled_before_its_task_starts_is_still_traced(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """タスクが動き出す前に取消されたターンも、ログと recent_traces に 1 回だけ残る。"""
+    rig = Rig()
+    with caplog.at_level(logging.INFO, logger="reachy_server.trace"):
+        await rig.conv.handle(
+            ProactiveRequest(intent_id="i1", kind="greet", strategy="x", context=CTX)
+        )
+        await rig.conv.handle(TurnCancel(turn_id="t1"))  # 1 回も await で譲らずに取消
+        await rig.settle()
+    (t,) = rig.conv.recent_traces
+    assert t["status"] == "cancelled" and t["turn_id"] == "t1"
+    assert t["first_audio_ms"] is None and t["sentences"] == 0
+    assert len([r for r in caplog.records if r.name == "reachy_server.trace"]) == 1
+
+
+async def test_a_replaced_turn_is_traced_once_each() -> None:
+    rig = Rig()
+    for i in ("i1", "i2"):  # 続けて来た要求は、前のターンを閉じてから始める
+        await rig.conv.handle(
+            ProactiveRequest(intent_id=i, kind="greet", strategy="x", context=CTX)
+        )
+    await rig.settle()
+    assert sorted(t["turn_id"] for t in rig.conv.recent_traces) == ["t1", "t2"]
+
+
+def test_a_trace_is_emitted_only_once() -> None:
+    trace = TurnTrace("t1", "u1", "utterance", clock=ManualClock())
+    assert trace.emit("ok") is not None
+    assert trace.emit("cancelled") is None
+
+
+# ---------------------------------------------------------------- 起動の入口でログが出る
+
+
+def test_the_entrypoint_configures_logging_so_traces_are_visible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``python -m reachy_server`` で、トレース（INFO）が捨てられない。"""
+    from reachy_server import __main__ as entry
+
+    root = logging.getLogger()
+    saved = (root.level, list(root.handlers))
+    monkeypatch.setenv("REACHY_SERVER_TOKEN", "x" * 16)
+    monkeypatch.setattr(entry, "create_app", lambda _settings: object())
+    monkeypatch.setattr(entry.uvicorn, "run", lambda *_a, **_k: None)
+    try:
+        root.setLevel(logging.WARNING)  # 何も設定していない状態（既定は WARNING）
+        entry.main()
+        assert logging.getLogger("reachy_server.trace").isEnabledFor(logging.INFO)
+        assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)  # 外部はうるさいので静かに
+    finally:
+        root.handlers[:] = saved[1]
+        root.setLevel(saved[0])
+
+
+def test_log_level_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from reachy_server.config import ServerSettings
+
+    monkeypatch.setenv("REACHY_SERVER_TOKEN", "x" * 16)
+    monkeypatch.setenv("REACHY_SERVER_LOG_LEVEL", "debug")
+    assert ServerSettings().log_level == "debug"  # pyright: ignore[reportCallIssue]
+    monkeypatch.setenv("REACHY_SERVER_LOG_LEVEL", "loud")
+    with pytest.raises(ValueError):
+        ServerSettings()  # pyright: ignore[reportCallIssue]
