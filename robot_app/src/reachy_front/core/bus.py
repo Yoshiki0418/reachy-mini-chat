@@ -94,8 +94,7 @@ class EventBus:
     def unsubscribe(self, sub: Subscription) -> None:
         if sub in self._subs:
             self._subs.remove(sub)
-            if sub.task is not None:
-                sub.task.cancel()
+            self._stop(sub)
 
     # ------------------------------------------------------------------ 発行
 
@@ -117,6 +116,15 @@ class EventBus:
     def start_trace(self, event: Event) -> Event:
         """新しい ``trace_id`` で発行する（連鎖の起点。入室・発話の終わりなど）。"""
         return self.publish(event.model_copy(update={"trace_id": new_trace_id()}))
+
+    @staticmethod
+    def _stop(sub: Subscription) -> None:
+        """タスクを止め、``drain`` で待っている人を起こす（待ち続けないように）。"""
+        if sub.task is not None:
+            sub.task.cancel()
+        sub.queue.clear()
+        sub.busy = False
+        sub._idle.set()  # pyright: ignore[reportPrivateUsage]
 
     @staticmethod
     def _enqueue(sub: Subscription, event: Event) -> None:
@@ -171,8 +179,8 @@ class EventBus:
         """購読者のタスクを止める。以降の発行は無視される。"""
         self._closed = True
         tasks = [s.task for s in self._subs if s.task is not None]
-        for t in tasks:
-            t.cancel()
+        for s in self._subs:
+            self._stop(s)
         await asyncio.gather(*tasks, return_exceptions=True)
         self._subs.clear()
 

@@ -118,14 +118,14 @@ class FloorDecided(Event):
     type: Literal["floor_decided"] = "floor_decided"
     utt_id: str
     decision: Literal["respond", "backchannel", "ignore"]
-    reasons: list[str] = Field(default_factory=list)
+    reasons: tuple[str, ...] = ()
 
 
 class ProactiveDecided(Event):
     type: Literal["proactive_decided"] = "proactive_decided"
     intent: str
     person_id: str | None = None
-    reasons: list[str] = Field(default_factory=list)
+    reasons: tuple[str, ...] = ()
 
 
 # ---- expression ----------------------------------------------------------------------------

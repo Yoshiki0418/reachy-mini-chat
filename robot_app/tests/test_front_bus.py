@@ -166,3 +166,24 @@ async def test_drain_waits_for_events_published_by_handlers(bus: EventBus) -> No
     bus.publish(ev.SpeechEnded(utt_id="u", duration_s=1))
     await bus.drain(1)
     assert got == ["second"]
+
+
+@pytest.mark.parametrize("how", ["unsubscribe", "close"])
+async def test_drain_returns_when_a_busy_subscription_is_cancelled(how: str) -> None:
+    bus = EventBus()
+    block = asyncio.Event()
+
+    async def stuck(_e: Event) -> None:
+        await block.wait()
+
+    sub = bus.subscribe(ev.TurnEnded, stuck)
+    bus.publish(ev.TurnEnded(turn_id="a"))
+    await asyncio.sleep(0.02)  # ハンドラは処理中
+    waiter = asyncio.create_task(bus.drain())  # タイムアウトなし
+    await asyncio.sleep(0.02)
+    if how == "unsubscribe":
+        bus.unsubscribe(sub)
+    else:
+        await bus.close()
+    await asyncio.wait_for(waiter, 1)  # 待ち続けない
+    await bus.close()

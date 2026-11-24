@@ -26,7 +26,7 @@ SAMPLES: list[Event] = [
     ev.AudioChunkReceived(turn_id="t1", seq=0, nbytes=960),
     ev.TurnEnded(turn_id="t1"),
     ev.ServerConnectionChanged(connected=False),
-    ev.FloorDecided(utt_id="u1", decision="respond", reasons=["name_called"]),
+    ev.FloorDecided(utt_id="u1", decision="respond", reasons=("name_called",)),
     ev.ProactiveDecided(intent="greet", person_id="p1"),
     ev.RobotSpeechStarted(turn_id="t1"),
     ev.RobotSpeechEnded(),
@@ -66,3 +66,13 @@ def test_field_ranges_are_checked() -> None:
         ev.FaceTracked(track_id=1, cx=1.5, cy=0.5, width_frac=0.1)
     with pytest.raises(ValidationError):
         ev.PersonIdentified(track_id=1, person_id=None, score=2)
+
+
+def test_reasons_cannot_be_mutated_after_publication() -> None:
+    for e in (
+        ev.FloorDecided(utt_id="u", decision="respond", reasons=("name_called",)),
+        ev.ProactiveDecided(intent="greet", reasons=("eye_contact",)),
+    ):
+        assert isinstance(e.reasons, tuple)
+        with pytest.raises(AttributeError):
+            e.reasons.append("x")  # type: ignore[attr-defined]
