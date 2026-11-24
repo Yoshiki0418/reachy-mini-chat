@@ -121,6 +121,10 @@ class FakeRobotIO:
 
     def queue_audio(self, frames: Iterable[AudioFrame], doa: Iterable[DoAReading] = ()) -> None:
         """あとから入力を足す（会話の続きのテスト用）。"""
+        # 既存の音声に DoA が足りなければ、まず ``read_doa`` の既定（最後の値、無ければ無音）で埋める。
+        # そうしないと、足した DoA が先の音声のぶんにずれて当たってしまう
+        pad = self.doa[-1] if self.doa else DoAReading(None, False)
+        self.doa = [*self.doa, *([pad] * max(0, len(self.audio) - len(self.doa)))]
         self.audio = [*self.audio, *frames]
         self.doa = [*self.doa, *doa]
 

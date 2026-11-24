@@ -325,3 +325,28 @@ async def test_calls_before_start_fail_clearly() -> None:
         await ReachyRobotIO().set_mic_enabled(True)
     with pytest.raises(RuntimeError):
         ReachyRobotIO(None)._media()  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_queued_doa_stays_aligned_with_the_queued_audio() -> None:
+    chunk = AudioFrame(struct.pack("<1f", 0), 16000)
+    fake = FakeRobotIO(audio=[chunk, chunk], doa=[DoAReading(10, True)])  # DoA は 1 つだけ
+    fake.queue_audio([chunk, chunk], [DoAReading(20, False), DoAReading(90, True)])
+    out: list[DoAReading | None] = []
+    for _ in range(4):
+        await fake.read_audio()
+        out.append(await fake.read_doa())
+    # 先の 2 チャンクは最初の値のまま、足した 2 チャンクは足した順
+    assert out == [
+        DoAReading(10, True),
+        DoAReading(10, True),
+        DoAReading(20, False),
+        DoAReading(90, True),
+    ]
+
+
+async def test_queued_audio_without_doa_falls_back_to_no_speech() -> None:
+    chunk = AudioFrame(struct.pack("<1f", 0), 16000)
+    fake = FakeRobotIO()
+    fake.queue_audio([chunk])  # DoA なし
+    await fake.read_audio()
+    assert await fake.read_doa() == DoAReading(None, False)
