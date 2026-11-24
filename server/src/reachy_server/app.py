@@ -14,8 +14,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket
 
+from reachy_protocol.classify import ClassifyRequest, ClassifyResponse
 from reachy_protocol.version import PROTOCOL_VERSION
 
+from .classify import Classifier
 from .clips import ClipStore
 from .config import ServerSettings
 from .history import HistoryStore
@@ -38,6 +40,7 @@ def create_app(
     store = history or HistoryStore(settings.history_db or None)
     retention = settings.history_retention_days
     clips = ClipStore()
+    classifier = Classifier(providers.llm, settings.classify_timeout_s)
 
     def authorize(authorization: str | None) -> None:
         expected = settings.token.get_secret_value().encode()
@@ -100,6 +103,13 @@ def create_app(
         if clip is None:
             raise HTTPException(404, "no such clip")
         return Response(clip.wav, media_type="audio/wav", headers={"ETag": f'"{clip.info.sha256}"'})
+
+    @app.post("/v1/classify")
+    async def classify(  # pyright: ignore[reportUnusedFunction]
+        req: ClassifyRequest, authorization: str | None = Header(default=None)
+    ) -> ClassifyResponse:
+        authorize(authorization)
+        return await classifier.classify(req)
 
     @app.websocket("/v1/session")
     async def session(ws: WebSocket) -> None:  # pyright: ignore[reportUnusedFunction]

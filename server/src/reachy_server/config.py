@@ -35,6 +35,10 @@ class ServerSettings(BaseSettings):
         default=3.0, gt=0, description="memory.op に対するロボットの memory.ack を待つ時間"
     )
 
+    classify_timeout_s: float = Field(
+        default=0.4, gt=0, description="宛先判定の補助 API（/v1/classify）の LLM を待つ時間"
+    )
+
     # 会話履歴（SQLite。空ならメモリ上）と保持期限
     history_db: str = "data/server/history.sqlite"
     history_retention_days: int = Field(default=14, ge=1)
