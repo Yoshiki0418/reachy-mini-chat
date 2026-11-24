@@ -1,6 +1,6 @@
 """サーバーが事前合成した音声（フィラー・定型挨拶）のキャッシュ（設計書 §4.3）。
 
-- ディスクに置き、**サーバーが落ちていても起動時に読める**（サーバー断のフォールバックの材料。#36）
+- ディスクに置き（音声のファイル名はハッシュ入りで、一覧を最後に切り替える）、**サーバーが落ちていても起動時に読める**（サーバー断のフォールバックの材料。#36）
 - 版は一覧の ``version``。前回と同じなら取り直さない（``If-None-Match`` → 304）。音声は SHA-256 で検証
 - 取得は「全部そろってから」切り替える。途中で失敗しても、前の版がそのまま使える
 - ID はサーバーから来るので、ファイル名に使う前に検査する（``../`` などを通さない）。件数・大きさにも上限
@@ -34,6 +34,12 @@ _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 MAX_CLIPS = 64
 MAX_CLIP_BYTES = 4 * 1024 * 1024
 _MANIFEST = "manifest.json"
+
+
+def clip_filename(info: ClipInfo) -> str:
+    """ディスク上のファイル名。**中身（ハッシュ）で決める**ので、版が変わっても古い音声を上書きしない
+    （一覧を置き換える前に落ちても、前の版がそのまま読める）。"""
+    return f"{info.id}-{info.sha256[:16]}.wav"
 
 
 class ClipFetchError(Exception):
@@ -124,14 +130,17 @@ class ClipCache:
             wav = self._read_valid(info)
             if wav is not None:
                 clips[info.id] = CachedClip(info, wav)
-        self._clips, self._version = clips, manifest.version
+        # 一部でも欠けて（壊れて）いたら、版を「最新」と見なさない。次の refresh で一覧を取り直し、
+        # 無事な分は使い回して、欠けた分だけ取る
+        complete = len(clips) == len(manifest.clips)
+        self._clips, self._version = clips, manifest.version if complete else None
         return len(clips)
 
     def _read_valid(self, info: ClipInfo) -> bytes | None:
         if not _ID.match(info.id):
             return None
         try:
-            wav = (self._dir / f"{info.id}.wav").read_bytes()
+            wav = (self._dir / clip_filename(info)).read_bytes()
         except OSError:
             return None
         if hashlib.sha256(wav).hexdigest() != info.sha256 or len(wav) != info.nbytes:
@@ -184,13 +193,14 @@ class ClipCache:
 
     def _write(self, manifest: ClipManifest, clips: dict[str, CachedClip]) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
-        for clip_id, clip in clips.items():
-            self._atomic(self._dir / f"{clip_id}.wav", clip.wav)
+        wanted = {clip_filename(c.info) for c in clips.values()}
+        for clip in clips.values():
+            self._atomic(self._dir / clip_filename(clip.info), clip.wav)
         kept = ClipManifest(version=manifest.version, clips=[c.info for c in clips.values()])
         # 一覧は最後に書く。途中で止まっても、前の一覧と音声がそろったまま
         self._atomic(self._dir / _MANIFEST, kept.model_dump_json().encode())
-        for p in self._dir.glob("*.wav"):
-            if p.stem not in clips:
+        for p in self._dir.glob("*.wav"):  # 一覧を切り替えた後で、使わなくなった音声を消す
+            if p.name not in wanted:
                 with contextlib.suppress(OSError):
                     p.unlink()
 
@@ -223,4 +233,5 @@ __all__ = [
     "ClipFetchError",
     "ClipFetcher",
     "HttpClipFetcher",
+    "clip_filename",
 ]

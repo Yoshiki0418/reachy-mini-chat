@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from reachy_front.client import ClipCache, ClipFetchError, HttpClipFetcher
-from reachy_front.client.clips import MAX_CLIP_BYTES
+from reachy_front.client.clips import MAX_CLIP_BYTES, clip_filename
 from reachy_front.core import EventBus
 from reachy_front.core import events as ev
 from reachy_protocol.clips import ClipInfo, ClipManifest
@@ -99,7 +99,12 @@ async def test_new_version_fetches_only_changed_clips_and_removes_stale_files(
     fetcher.set("v2", {"filler-a": b"RIFFa", "filler-c": b"RIFFc"})  # a は同じ、b は消え、c は新規
     assert await cache.refresh() is True
     assert fetcher.clip_calls == ["filler-c"]
-    assert sorted(p.name for p in tmp_path.glob("*.wav")) == ["filler-a.wav", "filler-c.wav"]
+    assert sorted(
+        p.name.split("-")[0] + "-" + p.name.split("-")[1] for p in tmp_path.glob("*.wav")
+    ) == [
+        "filler-a",
+        "filler-c",
+    ]  # 旧版（filler-b）の音声は消える
     assert {c.info.id for c in cache.of_kind("filler")} == {"filler-a", "filler-c"}
     assert ClipCache(tmp_path).load() == 2
 
@@ -153,7 +158,8 @@ async def test_unsafe_ids_and_oversized_clips_are_ignored(tmp_path: Path) -> Non
     assert [c.info.id for c in cache.of_kind("filler")] == ["ok-1"]
     assert fetcher.clip_calls == ["ok-1"]  # 不正な ID は取りにも行かない
     assert not (tmp_path / "evil.wav").exists()  # 外には書かない
-    assert sorted(p.name for p in cache_dir.iterdir()) == ["manifest.json", "ok-1.wav"]
+    assert sorted(p.name for p in cache_dir.iterdir())[0] == "manifest.json"
+    assert len(list(cache_dir.glob("*.wav"))) == 1
 
 
 async def test_too_many_clips_are_rejected(tmp_path: Path) -> None:
@@ -188,8 +194,8 @@ def test_load_skips_corrupted_files_and_a_missing_manifest(tmp_path: Path) -> No
     good, bad = b"RIFFgood", b"RIFFbad"
     manifest = ClipManifest(version="v1", clips=[info("good", good), info("bad", bad)])
     (tmp_path / "manifest.json").write_text(manifest.model_dump_json())
-    (tmp_path / "good.wav").write_bytes(good)
-    (tmp_path / "bad.wav").write_bytes(b"RIFFtampered")  # ハッシュが合わない
+    (tmp_path / clip_filename(info("good", good))).write_bytes(good)
+    (tmp_path / clip_filename(info("bad", bad))).write_bytes(b"RIFFtampered")  # ハッシュが合わない
     cache = ClipCache(tmp_path)
     assert cache.load() == 1
     assert cache.get("good") is not None and cache.get("bad") is None
@@ -306,3 +312,45 @@ async def test_http_fetcher_errors_become_clip_fetch_errors(
         await HttpClipFetcher(http_server.url, "secret-token-0123456789").clip("nope")
     with pytest.raises(ClipFetchError):
         await HttpClipFetcher("http://127.0.0.1:1", "x" * 16, timeout_s=1.0).manifest(None)
+
+
+# ---------------------------------------------------------------- Codex の指摘（#131）
+
+
+async def test_a_crash_before_the_manifest_is_committed_keeps_the_old_cache_usable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fetcher = FakeFetcher("v1", {"filler-a": b"RIFFold"})
+    await ClipCache(tmp_path, fetcher).refresh()
+    fetcher.set("v2", {"filler-a": b"RIFFnew"})  # 同じ ID で中身が変わる
+
+    real = ClipCache._atomic  # pyright: ignore[reportPrivateUsage]
+
+    def crash_on_manifest(path: Path, data: bytes) -> None:
+        if path.name == "manifest.json":
+            raise OSError("disk full")  # 音声は書けたが、一覧を置き換える前に落ちた
+        real(path, data)
+
+    monkeypatch.setattr(ClipCache, "_atomic", staticmethod(crash_on_manifest))
+    assert await ClipCache(tmp_path, fetcher).refresh() is False
+    monkeypatch.undo()
+    offline = ClipCache(tmp_path)
+    assert offline.load() == 1 and offline.version == "v1"  # 前の版が、そのまま読める
+    clip = offline.get("filler-a")
+    assert clip is not None and clip.wav == b"RIFFold"
+
+
+async def test_a_damaged_cache_is_repaired_even_when_the_server_version_is_unchanged(
+    tmp_path: Path,
+) -> None:
+    fetcher = FakeFetcher("v1", {"filler-a": b"RIFFa", "filler-b": b"RIFFb"})
+    await ClipCache(tmp_path, fetcher).refresh()
+    (tmp_path / clip_filename(info("filler-b", b"RIFFb"))).unlink()  # 一部が消えた
+    cache = ClipCache(tmp_path, fetcher)
+    assert cache.load() == 1
+    assert cache.version is None  # 欠けているので「最新」とは言わない
+    fetcher.clip_calls.clear()
+    assert await cache.refresh() is True
+    assert fetcher.clip_calls == ["filler-b"]  # 無事な分は取り直さず、欠けた分だけ取る
+    assert cache.get("filler-b") is not None and cache.version == "v1"
+    assert ClipCache(tmp_path).load() == 2
