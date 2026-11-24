@@ -236,6 +236,13 @@ class ServerClient:
         self.connected = False
         self._seq.clear()
         self._pongs.clear()
+        # サーバーは接続ごとに ID（turn_id / op_id / call_id）を振り直す。前の接続のものが
+        # 次の接続に紛れ込まないよう、取消の記録と、処理中の依頼（返事を出す側）を捨てる
+        self._cancelled.clear()
+        pending = list(self._handler_tasks)
+        for t in pending:
+            t.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
         # 繋ぎ直した後に、古いターンの音声が流れないようにする
         while not self.audio.empty():
             self.audio.get_nowait()

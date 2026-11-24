@@ -389,3 +389,57 @@ async def test_server_error_is_logged_not_fatal(bus: EventBus) -> None:
     client = make_client(Harness(), bus)
     client._dispatch(Error(code="timeout", message="slow"))  # pyright: ignore[reportPrivateUsage]
     assert client.fatal is None
+
+
+async def test_cancelled_turn_ids_do_not_leak_into_the_next_session(bus: EventBus) -> None:
+    # サーバーは接続ごとに t1 から振り直す。前の接続で取り消した t1 の記録が残ると、
+    # 繋ぎ直した後の t1 の音声を捨ててしまう
+    from reachy_protocol.channel import BinaryFrame
+    from reachy_protocol.framing import BinaryHeader
+
+    h = Harness()
+    client = make_client(h, bus)
+    client.start()
+    await asyncio.wait_for(client.ready.wait(), 2)
+    await client.cancel_turn("t1", "barge_in")
+    h.serve_tasks[0].cancel()  # 切れる
+    await until(lambda: h.connects >= 2 and client.connected)
+    header = BinaryHeader(kind="audio_out", ref="t1", seq=0, format="wav_pcm16")
+    client._on_audio(BinaryFrame(header, b"RIFFx"))  # pyright: ignore[reportPrivateUsage]
+    assert client.audio.qsize() == 1  # 新しい接続の t1 は別のターン
+    await client.close()
+
+
+async def test_a_handler_of_a_dropped_session_cannot_reply_on_the_next_one(
+    bus: EventBus,
+) -> None:
+    # サーバーは接続ごとに op_id / call_id を c1, o1 から振り直す。古い接続の処理が後で返事を出すと、
+    # 新しい接続の同じ ID の依頼に答えたことになってしまう
+    server = FakeServer(
+        FakeServerConfig(token=TOKEN, memory_ops=[("set_name", "さくら")], sentence_interval=5.0)
+    )
+    h = Harness(server)
+    client = make_client(h, bus)
+    release = asyncio.Event()
+    started = asyncio.Event()
+
+    async def slow(msg: Message) -> None:
+        assert isinstance(msg, MemoryOp)
+        started.set()
+        await release.wait()
+        await client.reply_memory_ack(msg.op_id, "applied")
+
+    client.on_message(MemoryOp, slow)
+    client.start()
+    await asyncio.wait_for(client.ready.wait(), 2)
+    await talk(client)
+    await client.decide_floor(
+        FloorDecision(utt_id="u1", decision="respond", context=default_context())
+    )
+    await asyncio.wait_for(started.wait(), 2)  # 処理の途中
+    h.serve_tasks[0].cancel()
+    await until(lambda: h.connects >= 2 and client.connected)
+    release.set()  # 古い接続の処理が、いまさら返事を出そうとする
+    await asyncio.sleep(0.1)
+    assert server.log.acks == []
+    await client.close()
