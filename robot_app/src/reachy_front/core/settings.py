@@ -98,6 +98,12 @@ class ServerLinkSettings(_Env):
         return f"http://{self.host}:{self.port}"
 
 
+class ClipsSettings(_Env):
+    """サーバーが配る事前合成の音声（フィラー・定型挨拶）のキャッシュ。サーバーが落ちていても使える。"""
+
+    dir: str = Field("data/robot/clips", alias="REACHY_CLIPS_DIR")
+
+
 class FrontSettings(_Env):
     """ロボット側の設定すべて。``FrontSettings()`` で環境変数から読む。"""
 
@@ -106,6 +112,7 @@ class FrontSettings(_Env):
     gate: GateSettings = Field(default_factory=lambda: GateSettings())  # pyright: ignore[reportCallIssue]
     gaze: GazeSettings = Field(default_factory=lambda: GazeSettings())  # pyright: ignore[reportCallIssue]
     server: ServerLinkSettings = Field(default_factory=lambda: ServerLinkSettings())  # pyright: ignore[reportCallIssue]
+    clips: ClipsSettings = Field(default_factory=lambda: ClipsSettings())  # pyright: ignore[reportCallIssue]
 
     def dump(self) -> dict[str, Any]:
         """起動時のログ用。トークンは値を出さず、設定の有無だけ示す。"""
@@ -115,6 +122,7 @@ class FrontSettings(_Env):
 
 
 __all__ = [
+    "ClipsSettings",
     "EyeContactSettings",
     "FrontSettings",
     "GateSettings",
