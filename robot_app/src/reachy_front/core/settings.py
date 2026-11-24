@@ -86,6 +86,7 @@ class ServerLinkSettings(_Env):
 
     host: str = Field("localhost", alias="PC_HOST", description="サーバーのホスト名（mDNS 名など）")
     port: int = Field(8765, alias="PC_PORT", ge=1, le=65535)
+    robot_id: str = Field("reachy-mini", alias="REACHY_ROBOT_ID", min_length=1, max_length=64)
     token: SecretStr | None = Field(None, alias="REACHY_SERVER_TOKEN", min_length=16)
 
     @property

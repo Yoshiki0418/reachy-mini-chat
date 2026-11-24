@@ -14,7 +14,7 @@ Reachy Mini 上で動くフロントエンド。知覚・判断・記憶・サ�
 | 自発発話 | `PROACTIVE_ENABLED` `PROACTIVE_ENGAGE_SEC` `PROACTIVE_MIN_GAP` `PROACTIVE_POLL_SEC` |
 | 宛先の条件 | `GATE_EYE_SEC` |
 | 視線 | `GAZE_ENABLED` `GAZE_KP_YAW` `GAZE_KP_PITCH` `GAZE_YAW_SIGN` `GAZE_PITCH_SIGN` `GAZE_DEBUG` |
-| サーバー | `PC_HOST` `PC_PORT` `REACHY_SERVER_TOKEN`（16 文字以上。サーバーと同じ値） |
+| サーバー | `PC_HOST` `PC_PORT` `REACHY_ROBOT_ID`（既定 reachy-mini）`REACHY_SERVER_TOKEN`（16 文字以上。サーバーと同じ値） |
 
 起動すると、設定をログに 1 行で出す（トークンは値を出さない）: `python -m reachy_front`
 
