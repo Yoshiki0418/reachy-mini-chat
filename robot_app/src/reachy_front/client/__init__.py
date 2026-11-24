@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from .clips import CachedClip, ClipCache, ClipFetcher, ClipFetchError, HttpClipFetcher
 from .link import AudioClip, Connect, LinkConfig, NotConnected, ServerClient
 from .ws import WebSocketClientTransport, connect_websocket
 
 __all__ = [
     "AudioClip",
+    "CachedClip",
+    "ClipCache",
+    "ClipFetchError",
+    "ClipFetcher",
     "Connect",
+    "HttpClipFetcher",
     "LinkConfig",
     "NotConnected",
     "ServerClient",
