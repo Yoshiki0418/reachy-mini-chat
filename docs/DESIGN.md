@@ -78,6 +78,7 @@
 | 音声送信（LAN） | < 50 ms |
 | STT（GPU, faster-whisper） | 0.2〜0.5 s（実測 p50 0.11 s・p90 0.14 s、kotoba-whisper-v2.0。[benchmarks.md](benchmarks.md)） |
 | 宛先判定の往復（transcript → decision） | < 30 ms（ルールのみ） |
+| 宛先判定の補助 API（`/v1/classify`） | 400 ms で打ち切り、返らなければ `unsure`（ルールのみで決める）。クラウドの LLM は実測 0.5〜0.9 s で収まらない（[benchmarks.md](benchmarks.md)、#124） |
 | LLM の最初の文 | 0.5〜1.0 s |
 | TTS 最初の文（GPU, Irodori-TTS） | 0.1〜0.3 s（実測 p50 0.20 s・p90 0.22 s、v4.1-Small-MF） |
 | **合計（体感）** | **2.0 s 以下**。超えそうなときはロボット側のフィラーを先に再生する |
