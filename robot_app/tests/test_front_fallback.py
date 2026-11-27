@@ -190,7 +190,13 @@ async def test_busy_reactions_are_dropped_not_queued(tmp_path: Path) -> None:
     world = World()
     world.attach(bus)
     ctrl = FallbackController(
-        io, bus, world, cache, clock=clock, config=FallbackConfig(greeting_min_gap_s=0.0)
+        io,
+        bus,
+        world,
+        cache,
+        clock=clock,
+        config=FallbackConfig(greeting_min_gap_s=0.0),
+        hour=lambda: 14,
     )
     ctrl.attach()
     ctrl._down_since = 0.0  # pyright: ignore[reportPrivateUsage]
@@ -248,7 +254,7 @@ async def test_missing_clips_degrade_to_a_nod_or_silence(tmp_path: Path) -> None
     io = RecordingIO()
     world = World()
     world.attach(bus)
-    ctrl = FallbackController(io, bus, world, cache, clock=clock)
+    ctrl = FallbackController(io, bus, world, cache, clock=clock, hour=lambda: 14)
     ctrl.attach()
     ctrl._down_since = 0.0  # pyright: ignore[reportPrivateUsage]
     bus.publish(ev.PersonEntered(track_id=1))
@@ -315,7 +321,13 @@ async def test_fault_injection_server_down_and_back(tmp_path: Path) -> None:
     world = World()
     world.attach(bus)
     ctrl = FallbackController(
-        io, bus, world, cache, clock=clock, config=FallbackConfig(greeting_min_gap_s=0.0)
+        io,
+        bus,
+        world,
+        cache,
+        clock=clock,
+        config=FallbackConfig(greeting_min_gap_s=0.0),
+        hour=lambda: 14,
     )
     ctrl.attach()
     net = Net()
@@ -408,7 +420,13 @@ async def flaky_rig(
     world = World()
     world.attach(bus)
     ctrl = FallbackController(
-        io, bus, world, cache, clock=clock, config=FallbackConfig(greeting_min_gap_s=0.0)
+        io,
+        bus,
+        world,
+        cache,
+        clock=clock,
+        config=FallbackConfig(greeting_min_gap_s=0.0),
+        hour=lambda: 14,
     )
     ctrl.attach()
     ctrl._down_since = 0.0  # pyright: ignore[reportPrivateUsage]
