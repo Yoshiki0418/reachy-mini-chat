@@ -164,26 +164,31 @@ class FallbackController:
         return True
 
     async def _react(self, clip: CachedClip | None, nod: bool) -> None:
+        jobs: list[asyncio.Task[None]] = []
         try:
-            jobs: list[asyncio.Future[None] | asyncio.Task[None]] = []
             if nod:
                 jobs.append(asyncio.ensure_future(self._nod()))
             if clip is not None:
                 jobs.append(asyncio.ensure_future(self._speak(clip)))
-            await asyncio.gather(*jobs)
+            # どちらかが失敗しても、もう片方が終わる（あと始末する）まで待つ。放置しない
+            for result in await asyncio.gather(*jobs, return_exceptions=True):
+                if isinstance(result, BaseException):
+                    log.error("フォールバックの反応に失敗", exc_info=result)
         except asyncio.CancelledError:
+            for job in jobs:  # 止めるときは、両方を止めてあと始末が終わるまで待つ
+                job.cancel()
+            await asyncio.gather(*jobs, return_exceptions=True)
             raise
-        except Exception:
-            log.exception("フォールバックの反応に失敗")
         finally:
             self._busy = False
 
     async def _speak(self, clip: CachedClip) -> None:
         self._bus.publish(ev.RobotSpeechStarted())
-        await self._io.set_mic_enabled(False)  # 自分の声を拾わない
         try:
+            await self._io.set_mic_enabled(False)  # 自分の声を拾わない
             await self._io.play_wav(clip.wav)
         finally:
+            # マイクを切れなかった・取り消されたときも、マイクを戻し、開始と終了をそろえる
             with contextlib.suppress(Exception):
                 await self._io.set_mic_enabled(True)
             self._bus.publish(ev.RobotSpeechEnded())

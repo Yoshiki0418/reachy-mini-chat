@@ -372,3 +372,108 @@ async def test_fault_injection_server_down_and_back(tmp_path: Path) -> None:
     await client.close()
     await ctrl.close()
     await bus.close()
+
+
+# ---------------------------------------------------------------- 失敗・取消のあと始末（Codex の指摘 #132）
+
+
+class FlakyIO(RecordingIO):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fail_mic_off = False
+        self.fail_nod = False
+
+    async def set_mic_enabled(self, enabled: bool) -> None:
+        self.commands.append(MicEnabled(enabled))
+        if self.fail_mic_off and not enabled:
+            raise OSError("usb")
+        self.mic_enabled = enabled
+
+    async def goto_pose(
+        self, head: HeadPose, antennas: tuple[float, float] = (0.0, 0.0), duration_s: float = 0.3
+    ) -> None:
+        if self.fail_nod:
+            raise OSError("servo")
+        await super().goto_pose(head, antennas, duration_s)
+
+
+async def flaky_rig(
+    tmp_path: Path,
+) -> tuple[FlakyIO, EventBus, World, FallbackController, list[Event], ManualClock]:
+    cache = await make_cache(tmp_path)
+    cache.load()
+    clock = ManualClock(10.0)
+    bus = EventBus(clock)
+    io = FlakyIO()
+    world = World()
+    world.attach(bus)
+    ctrl = FallbackController(
+        io, bus, world, cache, clock=clock, config=FallbackConfig(greeting_min_gap_s=0.0)
+    )
+    ctrl.attach()
+    ctrl._down_since = 0.0  # pyright: ignore[reportPrivateUsage]
+    events: list[Event] = []
+    bus.subscribe(Event, events.append)
+    return io, bus, world, ctrl, events, clock
+
+
+async def wait_idle(ctrl: FallbackController) -> None:
+    for _ in range(300):
+        if not ctrl.busy:
+            return
+        await asyncio.sleep(0.005)
+
+
+async def test_a_mic_failure_still_balances_the_speech_events(tmp_path: Path) -> None:
+    io, bus, world, ctrl, events, _ = await flaky_rig(tmp_path)
+    io.fail_mic_off = True
+    bus.publish(ev.PersonEntered(track_id=1))
+    await bus.drain(1)
+    await wait_idle(ctrl)
+    await bus.drain(1)
+    started = sum(isinstance(e, ev.RobotSpeechStarted) for e in events)
+    ended = sum(isinstance(e, ev.RobotSpeechEnded) for e in events)
+    assert started == ended == 1  # 開始と終了がそろう
+    assert world.snapshot().robot.speaking is False  # 「話し中」のまま固まらない
+    assert [c.enabled for c in io.commands if isinstance(c, MicEnabled)][-1] is True  # マイクを戻す
+    io.fail_mic_off = False
+    bus.publish(ev.PersonEntered(track_id=2))  # 次の反応も受け付ける
+    await bus.drain(1)
+    await wait_idle(ctrl)
+    assert len(io.played_wavs) == 1
+    await ctrl.close()
+    await bus.close()
+
+
+async def test_a_failed_nod_does_not_leave_playback_running_outside_the_controller(
+    tmp_path: Path,
+) -> None:
+    io, bus, _, ctrl, events, _ = await flaky_rig(tmp_path)
+    io.fail_nod = True
+    io.play_delay_s = 0.1
+    bus.publish(ev.PersonEntered(track_id=1))
+    await bus.drain(1)
+    await wait_idle(ctrl)
+    # 反応が終わった（busy でなくなった）時点で、再生も終わってあと始末されている
+    await bus.drain(1)
+    assert [c.enabled for c in io.commands if isinstance(c, MicEnabled)] == [False, True]
+    assert sum(isinstance(e, ev.RobotSpeechEnded) for e in events) == 1
+    await ctrl.close()
+    await bus.close()
+
+
+async def test_close_during_playback_cancels_and_cleans_up_both_jobs(tmp_path: Path) -> None:
+    io, bus, world, ctrl, events, _ = await flaky_rig(tmp_path)
+    io.play_delay_s = 5.0
+    bus.publish(ev.PersonEntered(track_id=1))
+    await bus.drain(1)
+    for _ in range(100):
+        if io.played_wavs:
+            break
+        await asyncio.sleep(0.005)
+    await ctrl.close()  # 再生の最中に止める
+    await bus.drain(1)
+    assert [c.enabled for c in io.commands if isinstance(c, MicEnabled)] == [False, True]
+    assert sum(isinstance(e, ev.RobotSpeechEnded) for e in events) == 1
+    assert world.snapshot().robot.speaking is False
+    await bus.close()
