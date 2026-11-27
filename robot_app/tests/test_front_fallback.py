@@ -18,7 +18,7 @@ from reachy_front.core import events as ev
 from reachy_front.core.events import Event
 from reachy_front.expression import FallbackConfig, FallbackController
 from reachy_front.io import FakeRobotIO, HeadPose
-from reachy_front.io.fake import GotoPose, MicEnabled, PlayWav
+from reachy_front.io.fake import GotoPose, MicEnabled, PlayWav, StopPlayback
 from reachy_front.world import World
 from reachy_protocol.clips import ClipInfo, ClipManifest
 from reachy_protocol.testing.fake_server import FakeServer, FakeServerConfig
@@ -476,4 +476,41 @@ async def test_close_during_playback_cancels_and_cleans_up_both_jobs(tmp_path: P
     assert [c.enabled for c in io.commands if isinstance(c, MicEnabled)] == [False, True]
     assert sum(isinstance(e, ev.RobotSpeechEnded) for e in events) == 1
     assert world.snapshot().robot.speaking is False
+    await bus.close()
+
+
+async def test_cancelling_stops_the_speaker_before_the_mic_is_restored(tmp_path: Path) -> None:
+    # 実機の play_wav は「再生を始めて、長さの分だけ待つ」だけなので、待ちを取り消しても音は止まらない。
+    # 先に再生を止めてからマイクを戻さないと、自分の声を拾い、「話し終えた」と言いながら鳴り続ける
+    io, bus, _, ctrl, events, _ = await flaky_rig(tmp_path)
+    io.play_delay_s = 5.0
+    bus.publish(ev.PersonEntered(track_id=1))
+    await bus.drain(1)
+    for _ in range(100):
+        if io.played_wavs:
+            break
+        await asyncio.sleep(0.005)
+    await ctrl.close()
+    kinds = [
+        type(c).__name__ + (str(c.enabled) if isinstance(c, MicEnabled) else "")
+        for c in io.commands
+    ]
+    mic_off, stop, mic_on = (
+        kinds.index("MicEnabledFalse"),
+        kinds.index("StopPlayback"),
+        kinds.index("MicEnabledTrue"),
+    )
+    assert mic_off < stop < mic_on
+    await bus.drain(1)
+    assert sum(isinstance(e, ev.RobotSpeechEnded) for e in events) == 1
+    await bus.close()
+
+
+async def test_a_normal_playback_does_not_call_stop(tmp_path: Path) -> None:
+    io, bus, _, ctrl, _, _ = await flaky_rig(tmp_path)
+    bus.publish(ev.PersonEntered(track_id=1))
+    await bus.drain(1)
+    await wait_idle(ctrl)
+    assert not [c for c in io.commands if isinstance(c, StopPlayback)]
+    await ctrl.close()
     await bus.close()

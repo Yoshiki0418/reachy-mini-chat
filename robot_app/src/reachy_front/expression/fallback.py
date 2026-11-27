@@ -184,11 +184,17 @@ class FallbackController:
 
     async def _speak(self, clip: CachedClip) -> None:
         self._bus.publish(ev.RobotSpeechStarted())
+        completed = False
         try:
             await self._io.set_mic_enabled(False)  # 自分の声を拾わない
             await self._io.play_wav(clip.wav)
+            completed = True
         finally:
-            # マイクを切れなかった・取り消されたときも、マイクを戻し、開始と終了をそろえる
+            # 取り消し・失敗のときは、実機の再生は待ちを取り消しても鳴り続けるので、先に止める。
+            # そのあとでマイクを戻す（自分の声を拾わない）。開始と終了のイベントもそろえる
+            if not completed:
+                with contextlib.suppress(Exception):
+                    await self._io.stop_playback()
             with contextlib.suppress(Exception):
                 await self._io.set_mic_enabled(True)
             self._bus.publish(ev.RobotSpeechEnded())
