@@ -23,3 +23,12 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+async def _check_link() -> int:
+    """サーバーとの接続チェック（会話はしない）。NG があれば 1 を返す。"""
+    from .tools.check_link import run_link_checks, targets_from_settings
+
+    settings = FrontSettings()
+    results = await run_link_checks(settings, targets_from_settings(settings))
+    return 1 if any(r.status == "NG" for r in results) else 0
