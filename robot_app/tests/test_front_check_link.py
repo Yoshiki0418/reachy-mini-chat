@@ -117,3 +117,38 @@ async def test_wrong_token_is_reported_at_the_handshake_quickly(
     assert [r.status for r in results] == ["OK", "OK", "NG"]
     assert results[2].detail == "unauthorized"
     assert loop.time() - t0 < 2.0  # タイムアウトまで待たず、拒否された時点で止まる
+
+
+# ---------------------------------------------------------------- 入口（python -m reachy_front ...）
+
+
+def test_entrypoint_dispatches_the_check_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    from reachy_front import __main__ as entry
+
+    called: list[str] = []
+
+    async def fake_io() -> int:
+        called.append("io")
+        return 0
+
+    async def fake_link() -> int:
+        called.append("link")
+        return 1
+
+    monkeypatch.setattr(entry, "_check_io", fake_io)
+    monkeypatch.setattr(entry, "_check_link", fake_link)
+    assert entry.main(["check-io"]) == 0
+    assert entry.main(["check-link"]) == 1  # NG があれば終了コード 1
+    assert called == ["io", "link"]
+    assert entry.main(["nope"]) == 2
+
+
+def test_entrypoint_without_arguments_dumps_the_settings(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from reachy_front import __main__ as entry
+
+    monkeypatch.setenv("REACHY_SERVER_TOKEN", TOKEN)
+    with caplog.at_level("INFO", logger="reachy_front"):
+        assert entry.main([]) == 0
+    assert "settings:" in caplog.text and TOKEN not in caplog.text
