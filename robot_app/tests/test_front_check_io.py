@@ -123,3 +123,19 @@ async def test_a_direction_without_detected_speech_is_reported_as_such() -> None
     doa = next(r for r in results if r.name.startswith("DoA"))
     assert "正面 90°" in doa.detail and "右 30°" in doa.detail
     assert "左 発話と判定されず" in doa.detail
+
+
+async def test_a_speaker_failure_does_not_leave_the_microphone_off_or_poison_later_checks() -> None:
+    # Codex の指摘（#133）: play_wav が例外でも、マイクは戻す。マイクの検査（再生後に読めるか）を巻き込まない
+    class NoSpeaker(Endless):
+        async def play_wav(self, wav: bytes) -> None:
+            raise OSError("speaker unavailable")
+
+    fake = NoSpeaker(frames=[CameraFrame(2, 1, b"\x00" * 6)])
+    results = await run_checks(
+        fake, out=lambda _s: None, listen_s=0.05, doa_s=0.05, doa_prep_s=0, sleep=no_sleep
+    )
+    by_name = {r.name: r for r in results}
+    assert by_name["スピーカー"].status == "NG"  # 本当の失敗は、スピーカーとして報告される
+    assert by_name["再生後にマイクが戻る"].status == "OK"  # マイクの検査は、巻き込まれない
+    assert fake.mic_enabled is True

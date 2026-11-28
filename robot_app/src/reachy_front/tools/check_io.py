@@ -165,9 +165,11 @@ async def run_checks(
         out("… ビープを 1 回鳴らします")
         await rio.set_mic_enabled(False)
         t0 = clock()
-        await rio.play_wav(wav)
+        try:
+            await rio.play_wav(wav)
+        finally:
+            await rio.set_mic_enabled(True)  # 再生が失敗しても、あとの検査のためにマイクは戻す
         took = clock() - t0
-        await rio.set_mic_enabled(True)
         add(
             "再生（ビープ 0.6 秒）",
             "要確認",
