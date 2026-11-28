@@ -12,10 +12,11 @@ from __future__ import annotations
 import asyncio
 import io
 import math
+import statistics
 import struct
 import time
 import wave
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
 from ..io.base import AudioFrame, HeadPose, RobotIO
@@ -76,7 +77,9 @@ async def run_checks(
     *,
     out: Out = print,
     listen_s: float = 2.0,
-    doa_s: float = 4.0,
+    doa_s: float = 3.0,
+    doa_prep_s: float = 2.0,
+    doa_directions: Sequence[str] = ("正面", "左", "右"),
     sleep: Sleep = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> list[CheckResult]:
@@ -113,27 +116,34 @@ async def run_checks(
 
     await guarded("マイクの読み取り", mic)
 
-    # 3. DoA（話しかけて、角度と is_speech の変化を見る）
+    # 3. DoA（方向ごとに話しかけて、角度と is_speech を方向の名前つきで記録する）
     async def doa() -> None:
-        out(f"… {doa_s:.0f} 秒の間、ロボットの正面・左・右から順に話しかけてください")
-        angles: list[float] = []
-        speech = total = 0
-        end = clock() + doa_s
-        while clock() < end:
-            await rio.read_audio()
-            r = await rio.read_doa()
-            if r is not None:
-                total += 1
-                speech += r.speech
-                if r.speech and r.angle_deg is not None:
+        summary: list[str] = []
+        for name in doa_directions:
+            out(
+                f"… 【{name}】から話しかけてください（{doa_prep_s:.0f} 秒後に {doa_s:.0f} 秒間、測ります）"
+            )
+            await sleep(doa_prep_s)
+            angles: list[float] = []
+            end = clock() + doa_s
+            while clock() < end:
+                await rio.read_audio()
+                r = await rio.read_doa()
+                if r is not None and r.speech and r.angle_deg is not None:
                     angles.append(r.angle_deg)
-            await sleep(0.01)
-        span = f"{min(angles):.0f}〜{max(angles):.0f}°" if angles else "なし"
+                await sleep(0.01)
+            if angles:
+                summary.append(
+                    f"{name} {statistics.median(angles):.0f}°"
+                    f"（{min(angles):.0f}〜{max(angles):.0f}、発話判定 {len(angles)} 回）"
+                )
+            else:
+                summary.append(f"{name} 発話と判定されず")
         add(
-            "DoA（角度と発話の判定）",
+            "DoA（方向ごとの角度）",
             "要確認",
-            f"読み取り {total} 回、発話と判定 {speech} 回、発話中の角度 {span}"
-            "（正面・左・右で角度がどう変わるかを、座標系の対応として記録する）",
+            "、".join(summary)
+            + "（方向と角度の対応が、SDK の座標系。DoA と顔の位置の対応付けに使う）",
         )
 
     await guarded("DoA", doa)

@@ -152,3 +152,34 @@ def test_entrypoint_without_arguments_dumps_the_settings(
     with caplog.at_level("INFO", logger="reachy_front"):
         assert entry.main([]) == 0
     assert "settings:" in caplog.text and TOKEN not in caplog.text
+
+
+# ---------------------------------------------------------------- クリップ取得の失敗は OK にしない（Codex の指摘 #133）
+
+
+async def test_a_failed_clip_fetch_is_ng_even_when_a_local_cache_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from reachy_front.client import ClipFetchError
+
+    server = FakeServer(FakeServerConfig(token=TOKEN))
+    ok = targets(tmp_path, server)
+    await run_link_checks(
+        settings(monkeypatch), ok, out=lambda _s: None, timeout_s=1.0
+    )  # 先にキャッシュを作る
+
+    class Failing:
+        async def manifest(self, if_none_match: str | None) -> ClipManifest | None:
+            raise ClipFetchError("HTTP 503")
+
+        async def clip(self, clip_id: str) -> bytes:
+            raise AssertionError
+
+    broken = LinkTargets(ok.healthz, ok.connect, Failing(), ok.clips_dir)
+    results = await run_link_checks(
+        settings(monkeypatch), broken, out=lambda _s: None, timeout_s=1.0
+    )
+    clips = results[-1]
+    assert clips.name == "事前合成クリップの取得"
+    assert clips.status == "NG"  # ローカルに前のキャッシュがあっても、取得に失敗したことは隠さない
+    assert "503" in clips.detail and "ローカル" in clips.detail

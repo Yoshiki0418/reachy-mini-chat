@@ -5,8 +5,10 @@ from __future__ import annotations
 import io
 import struct
 import wave
+from typing import ClassVar
 
-from reachy_front.io import AudioFrame, CameraFrame, FakeRobotIO, RobotIO
+from reachy_front.core import ManualClock
+from reachy_front.io import AudioFrame, CameraFrame, DoAReading, FakeRobotIO, RobotIO
 from reachy_front.io.fake import GotoPose, PlayWav
 from reachy_front.tools.check_io import beep_wav, run_checks
 
@@ -60,3 +62,64 @@ async def test_a_failing_device_is_reported_as_ng_not_raised() -> None:
     camera = next(r for r in results if r.name == "カメラ")
     assert camera.status == "NG" and "camera gone" in camera.detail
     assert any(r.name == "首・アンテナ" for r in results)  # 1 つ壊れても、残りは続ける
+
+
+# ---------------------------------------------------------------- DoA の方向ごとの記録（Codex の指摘 #133）
+
+
+class Directional(Endless):
+    """話しかけた方向（プロンプトの【正面】【左】【右】）に応じて、DoA の角度を返す Fake。"""
+
+    ANGLES: ClassVar[dict[str, float]] = {"正面": 90.0, "左": 150.0, "右": 30.0}
+
+    def __init__(self, clock: ManualClock, silent_direction: str | None = None) -> None:
+        super().__init__(frames=[CameraFrame(2, 1, b"\x00" * 6)])
+        self.clock = clock
+        self.direction = ""
+        self.silent_direction = silent_direction
+
+    async def read_audio(self) -> AudioFrame | None:
+        self.clock.advance(0.01)  # 読むたびに時間が進む（実機のマイクの待ちの代わり）
+        return await super().read_audio()
+
+    async def read_doa(self) -> DoAReading | None:
+        if self.direction == self.silent_direction or self.direction not in self.ANGLES:
+            return DoAReading(None, False)
+        return DoAReading(self.ANGLES[self.direction], True)
+
+
+async def test_doa_is_recorded_per_direction_so_the_coordinate_mapping_is_known() -> None:
+    clock = ManualClock()
+    fake = Directional(clock)
+
+    def out(line: str) -> None:
+        for name in Directional.ANGLES:
+            if f"【{name}】" in line:
+                fake.direction = name  # オペレーターが、指示された方向から話しかける
+
+    async def sleep(s: float) -> None:
+        clock.advance(s)
+
+    results = await run_checks(fake, out=out, listen_s=0.1, doa_s=1.0, sleep=sleep, clock=clock.now)
+    doa = next(r for r in results if r.name.startswith("DoA"))
+    # 方向ごとの角度が、方向の名前つきで残る（最小・最大だけでは、どの方向か分からない）
+    assert "正面 90°" in doa.detail and "左 150°" in doa.detail and "右 30°" in doa.detail
+    assert doa.detail.index("正面") < doa.detail.index("左") < doa.detail.index("右")
+
+
+async def test_a_direction_without_detected_speech_is_reported_as_such() -> None:
+    clock = ManualClock()
+    fake = Directional(clock, silent_direction="左")
+
+    def out(line: str) -> None:
+        for name in Directional.ANGLES:
+            if f"【{name}】" in line:
+                fake.direction = name
+
+    async def sleep(s: float) -> None:
+        clock.advance(s)
+
+    results = await run_checks(fake, out=out, listen_s=0.1, doa_s=1.0, sleep=sleep, clock=clock.now)
+    doa = next(r for r in results if r.name.startswith("DoA"))
+    assert "正面 90°" in doa.detail and "右 30°" in doa.detail
+    assert "左 発話と判定されず" in doa.detail

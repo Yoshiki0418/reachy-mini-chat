@@ -144,12 +144,21 @@ async def run_link_checks(
         return results
     cache = ClipCache(targets.clips_dir, targets.fetcher)
     updated = await cache.refresh()
+    failure = cache.last_error  # 取得の失敗は、ローカルのキャッシュが読めても隠さない
     n = cache.load()
-    add(
-        "事前合成クリップの取得",
-        "OK" if n > 0 else "NG",
-        f"{n} 件を {targets.clips_dir} に保存（版 {cache.version}、{'新しく取得' if updated else '変更なし'}）",
-    )
+    if failure:
+        add(
+            "事前合成クリップの取得",
+            "NG",
+            f"取得に失敗: {failure}（ローカルのキャッシュ {n} 件は使える）",
+        )
+    else:
+        add(
+            "事前合成クリップの取得",
+            "OK" if n > 0 else "NG",
+            f"{n} 件を {targets.clips_dir} に保存（版 {cache.version}、"
+            f"{'新しく取得' if updated else '変更なし'}）",
+        )
     out(f"\n結果: NG {sum(r.status == 'NG' for r in results)} 件")
     return results
 

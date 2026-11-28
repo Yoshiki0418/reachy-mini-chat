@@ -354,3 +354,16 @@ async def test_a_damaged_cache_is_repaired_even_when_the_server_version_is_uncha
     assert fetcher.clip_calls == ["filler-b"]  # 無事な分は取り直さず、欠けた分だけ取る
     assert cache.get("filler-b") is not None and cache.version == "v1"
     assert ClipCache(tmp_path).load() == 2
+
+
+async def test_last_error_tells_a_failed_refresh_from_an_unchanged_one(tmp_path: Path) -> None:
+    fetcher = FakeFetcher("v1", {"filler-a": b"RIFFa"})
+    cache = ClipCache(tmp_path, fetcher)
+    assert await cache.refresh() is True and cache.last_error is None
+    assert await cache.refresh() is False and cache.last_error is None  # 変更なし（失敗ではない）
+    fetcher.set("v2", {"filler-a": b"RIFFa", "filler-b": b"RIFFb"})
+    fetcher.fail_on = "filler-b"
+    assert await cache.refresh() is False
+    assert cache.last_error and "boom" in cache.last_error  # 失敗は区別できる
+    fetcher.fail_on = None
+    assert await cache.refresh() is True and cache.last_error is None  # 直れば消える
