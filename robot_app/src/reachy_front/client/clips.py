@@ -105,6 +105,8 @@ class ClipCache:
         self._clips: dict[str, CachedClip] = {}
         self._version: str | None = None
         self._lock = asyncio.Lock()
+        self.last_error: str | None = None
+        """直近の ``refresh`` が失敗した理由（成功・変更なしなら None）。False の意味を区別するのに使う。"""
 
     @property
     def version(self) -> str | None:
@@ -158,13 +160,16 @@ class ClipCache:
         if self._fetcher is None:
             return False
         async with self._lock:
+            self.last_error = None
             try:
                 return await self._refresh(self._fetcher)
             except ClipFetchError as e:
                 log.warning("クリップの取得に失敗（前の版を使い続ける）: %s", e)
+                self.last_error = str(e)
                 return False
-            except OSError:
+            except OSError as e:
                 log.exception("クリップのキャッシュを書けない")
+                self.last_error = f"保存できない: {type(e).__name__}"
                 return False
 
     async def _refresh(self, fetcher: ClipFetcher) -> bool:
